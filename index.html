@@ -373,6 +373,93 @@ main{
   font-family: 'IBM Plex Mono', monospace;
 }
 
+.portfolio-layout{
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.dividend-panel{
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  position: sticky;
+  top: 20px;
+}
+.dividend-panel h3{
+  font-family: 'IBM Plex Serif', serif;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.dividend-panel .panel-sub{
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 14px;
+}
+.dividend-total{
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+.dividend-total .label{
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.dividend-total .amount{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--accent-gold);
+  margin-top: 4px;
+}
+.dividend-row{
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.dividend-row:first-of-type{ border-top: none; }
+.dividend-row .dr-top{
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.dividend-row .dr-ticker{
+  font-family: 'IBM Plex Mono', monospace;
+  font-weight: 600;
+  font-size: 13px;
+}
+.dividend-row .dr-perf{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+}
+.dividend-row .dr-perf.up{ color: var(--gain); }
+.dividend-row .dr-perf.down{ color: var(--loss); }
+.dividend-row .dr-detail{
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+.dividend-row .dr-yield{
+  color: var(--accent-gold);
+  font-family: 'IBM Plex Mono', monospace;
+}
+.dividend-empty{
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+@media (max-width: 720px){
+  .portfolio-layout{ grid-template-columns: 1fr; }
+  .dividend-panel{ position: static; }
+}
+
 .empty{
   text-align: center;
   padding: 60px 20px;
@@ -613,6 +700,48 @@ function renderSummary(){
   `;
 }
 
+function renderDividendPanel(){
+  if (!state.holdings.length){
+    return `<div class="dividend-panel">
+      <h3>Dividends</h3>
+      <div class="panel-sub">Income &amp; performance</div>
+      <div class="dividend-empty">Add a holding to see dividend info here.</div>
+    </div>`;
+  }
+
+  let totalAnnualIncome = 0;
+  const rows = state.holdings.map(h => {
+    const hasDiv = h.dividendPerShare !== undefined && h.dividendPerShare !== null;
+    const annualIncome = hasDiv ? (h.dividendPerShare * (h.shares || 0)) : 0;
+    if (hasDiv) totalAnnualIncome += annualIncome;
+    const dayDir = h.changePct > 0 ? 'up' : (h.changePct < 0 ? 'down' : '');
+    return `
+      <div class="dividend-row">
+        <div class="dr-top">
+          <span class="dr-ticker">${h.ticker}</span>
+          <span class="dr-perf ${dayDir}">${fmtPct(h.changePct)}</span>
+        </div>
+        <div class="dr-detail">
+          ${hasDiv
+            ? `Yield <span class="dr-yield">${h.dividendYield != null ? h.dividendYield.toFixed(2) + '%' : '—'}</span> · ${fmtMoney(h.dividendPerShare)}/yr per share<br>≈ ${fmtMoney(annualIncome)}/yr from your ${h.shares} share${h.shares === 1 ? '' : 's'}`
+            : 'Dividend data not loaded yet'}
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div class="dividend-panel">
+      <h3>Dividends</h3>
+      <div class="panel-sub">Income &amp; performance</div>
+      <div class="dividend-total">
+        <div class="label">Est. annual dividend income</div>
+        <div class="amount">${fmtMoney(totalAnnualIncome)}</div>
+      </div>
+      ${rows}
+      <button class="btn" style="width:100%; margin-top:12px; font-size:12px;" onclick="refreshPrices()">Refresh dividend data</button>
+    </div>`;
+}
+
 function holdingCard(h){
   const value = (h.currentPrice || 0) * (h.shares || 0);
   const invested = (h.costBasis || 0) * (h.shares || 0);
@@ -768,7 +897,11 @@ function render(){
   const content = document.getElementById('content');
   if (currentTab === 'portfolio'){
     const cards = state.holdings.map(holdingCard).join('');
-    content.innerHTML = `<div class="grid">${cards}${addCardHtml('holdings')}</div>`;
+    content.innerHTML = `
+      <div class="portfolio-layout">
+        ${renderDividendPanel()}
+        <div class="grid">${cards}${addCardHtml('holdings')}</div>
+      </div>`;
   } else if (currentTab === 'watchlist'){
     if (!state.watchlist.length){
       content.innerHTML = `<div class="grid">${addCardHtml('watchlist')}</div>`;
@@ -908,7 +1041,7 @@ async function refreshPrices(){
   btn.innerHTML = '<span class="spin"></span>Refreshing…';
   try{
     const tickers = all.map(x => x.ticker).join(', ');
-    const prompt = `Look up the current stock price, today's percent price change, and full company name for each of these tickers: ${tickers}. After searching, respond with ONLY a raw JSON object and nothing else — no markdown fences, no commentary. Format exactly like this: {"TICKER": {"price": 123.45, "changePct": -1.23, "name": "Company Name"}, ...} Include every ticker requested.`;
+    const prompt = `Look up the current stock price, today's percent price change, full company name, dividend yield (percent), and annual dividend paid per share for each of these tickers: ${tickers}. If a stock pays no dividend, use 0 for both dividend fields. After searching, respond with ONLY a raw JSON object and nothing else — no markdown fences, no commentary. Format exactly like this: {"TICKER": {"price": 123.45, "changePct": -1.23, "name": "Company Name", "dividendYield": 2.1, "dividendPerShare": 3.2}, ...} Include every ticker requested.`;
     const data = await callClaude(
       [{ role: 'user', content: prompt }],
       [{ type: 'web_search_20250305', name: 'web_search' }]
@@ -926,6 +1059,8 @@ async function refreshPrices(){
         item.currentPrice = info.price;
         item.changePct = info.changePct;
         if (info.name) item.name = info.name;
+        if (info.dividendYield !== undefined) item.dividendYield = info.dividendYield;
+        if (info.dividendPerShare !== undefined) item.dividendPerShare = info.dividendPerShare;
         updated++;
       }
     });
