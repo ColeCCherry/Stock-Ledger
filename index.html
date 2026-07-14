@@ -1083,7 +1083,7 @@ async function loadDiscoverPrices(){
       if (state.discoverPrices[s.ticker]){ updated++; continue; } // already cached, skip a quota hit
       try{
         const q2 = await fetchQuote(s.ticker);
-        state.discoverPrices[s.ticker] = q2;
+        state.discoverPrices[s.ticker] = { price: q2.price, changePct: q2.changePct, ts: Date.now() };
         updated++;
       }catch(err){
         if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
@@ -1174,10 +1174,50 @@ async function getInsight(list, id){
   }
 }
 
+function todayStr(){
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function autoFetchDiscover(){
+  // Prioritize tickers with no cached data yet; once everything's cached, refresh the stalest entries.
+  const uncached = DISCOVER_STOCKS.filter(s => !state.discoverPrices[s.ticker]);
+  const cachedBystale = DISCOVER_STOCKS
+    .filter(s => state.discoverPrices[s.ticker])
+    .sort((a, b) => (state.discoverPrices[a.ticker].ts || 0) - (state.discoverPrices[b.ticker].ts || 0));
+  const queue = [...uncached, ...cachedBystale].slice(0, 25);
+  if (!queue.length) return;
+
+  let fetched = 0;
+  let rateLimited = false;
+  for (const s of queue){
+    try{
+      const q = await fetchQuote(s.ticker);
+      state.discoverPrices[s.ticker] = { price: q.price, changePct: q.changePct, ts: Date.now() };
+      fetched++;
+      if (currentTab === 'discover') renderContentOnly();
+    }catch(err){
+      if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
+      console.error(`Auto-fetch failed for ${s.ticker}`, err);
+    }
+    await sleep(900);
+  }
+  state.lastAutoFetchDate = todayStr();
+  await saveState();
+  if (fetched > 0){
+    showToast(`Auto-loaded today's prices for ${fetched} Discover stock${fetched === 1 ? '' : 's'}.`, 3500);
+  }
+  if (rateLimited){
+    showToast(`Hit Alpha Vantage's daily limit after ${fetched} auto-loads.`, 3500);
+  }
+}
+
 (async function init(){
   const had = await loadState();
   if (!had) { seedDefaults(); await saveState(); }
   render();
+  if (state.lastAutoFetchDate !== todayStr()){
+    autoFetchDiscover(); // fire and forget — runs in the background, doesn't block the UI
+  }
 })();
 </script>
 </body>
