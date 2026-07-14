@@ -738,8 +738,48 @@ function renderDividendPanel(){
         <div class="amount">${fmtMoney(totalAnnualIncome)}</div>
       </div>
       ${rows}
-      <button class="btn" style="width:100%; margin-top:12px; font-size:12px;" onclick="refreshPrices()">Refresh dividend data</button>
+      <button class="btn" id="dividend-refresh-btn" style="width:100%; margin-top:12px; font-size:12px;" onclick="loadDividends()">Refresh dividend data</button>
     </div>`;
+}
+
+async function loadDividends(){
+  if (!state.holdings.length){ showToast('Add a holding first.'); return; }
+  const btn = document.getElementById('dividend-refresh-btn');
+  if (btn){ btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Loading…'; }
+  try{
+    let updated = 0;
+    // Fetch dividend data one ticker at a time — smaller, more reliable responses
+    for (const h of state.holdings){
+      const prompt = `Search for the current dividend yield (as a percent) and the total annual dividend paid per share for the stock ${h.ticker}. If it pays no dividend, use 0 for both. Respond with ONLY a compact raw JSON object, no markdown fences, no commentary, no extra text. Format exactly: {"dividendYield":2.05,"dividendPerShare":3.20}`;
+      try{
+        const data = await callClaude(
+          [{ role: 'user', content: prompt }],
+          [{ type: 'web_search_20250305', name: 'web_search' }]
+        );
+        const text = extractText(data).trim();
+        const jsonStart = text.indexOf('{');
+        const jsonEnd = text.lastIndexOf('}');
+        if (jsonStart === -1 || jsonEnd === -1) continue;
+        const parsed = JSON.parse(text.slice(jsonStart, jsonEnd + 1));
+        const y = parseFloat(parsed.dividendYield);
+        const d = parseFloat(parsed.dividendPerShare);
+        h.dividendYield = isNaN(y) ? 0 : y;
+        h.dividendPerShare = isNaN(d) ? 0 : d;
+        updated++;
+      }catch(innerErr){
+        console.error(`Dividend lookup failed for ${h.ticker}`, innerErr);
+      }
+    }
+    await saveState();
+    render();
+    showToast(`Loaded dividend data for ${updated} of ${state.holdings.length} holdings.`);
+  }catch(e){
+    console.error(e);
+    showToast("Couldn't load dividend data — try again in a moment.");
+  }finally{
+    const btnAgain = document.getElementById('dividend-refresh-btn');
+    if (btnAgain){ btnAgain.disabled = false; btnAgain.innerHTML = 'Refresh dividend data'; }
+  }
 }
 
 function holdingCard(h){
@@ -1041,7 +1081,7 @@ async function refreshPrices(){
   btn.innerHTML = '<span class="spin"></span>Refreshing…';
   try{
     const tickers = all.map(x => x.ticker).join(', ');
-    const prompt = `Look up the current stock price, today's percent price change, full company name, dividend yield (percent), and annual dividend paid per share for each of these tickers: ${tickers}. If a stock pays no dividend, use 0 for both dividend fields. After searching, respond with ONLY a raw JSON object and nothing else — no markdown fences, no commentary. Format exactly like this: {"TICKER": {"price": 123.45, "changePct": -1.23, "name": "Company Name", "dividendYield": 2.1, "dividendPerShare": 3.2}, ...} Include every ticker requested.`;
+    const prompt = `Look up the current stock price, today's percent price change, and full company name for each of these tickers: ${tickers}. After searching, respond with ONLY a raw JSON object and nothing else — no markdown fences, no commentary. Format exactly like this: {"TICKER": {"price": 123.45, "changePct": -1.23, "name": "Company Name"}, ...} Include every ticker requested.`;
     const data = await callClaude(
       [{ role: 'user', content: prompt }],
       [{ type: 'web_search_20250305', name: 'web_search' }]
@@ -1059,8 +1099,6 @@ async function refreshPrices(){
         item.currentPrice = info.price;
         item.changePct = info.changePct;
         if (info.name) item.name = info.name;
-        if (info.dividendYield !== undefined) item.dividendYield = info.dividendYield;
-        if (info.dividendPerShare !== undefined) item.dividendPerShare = info.dividendPerShare;
         updated++;
       }
     });
