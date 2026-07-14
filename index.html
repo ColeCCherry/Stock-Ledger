@@ -869,7 +869,8 @@ function discoverCard(s){
     <div class="discover-card-foot">
       ${already
         ? `<span class="tag-added">✓ ${inPortfolio ? 'In portfolio' : 'On watchlist'}</span>`
-        : `<button class="btn primary" onclick="addFromDiscover('${s.ticker}')">Add to watchlist</button>`}
+        : `<button class="btn primary" onclick="addFromDiscover('${s.ticker}')">Add to watchlist</button>
+           <button class="btn" onclick="addOwnedFromDiscover('${s.ticker}')">I own this</button>`}
     </div>
   </div>`;
 }
@@ -910,6 +911,25 @@ function addFromDiscover(ticker){
   saveState();
   renderContentOnly();
   showToast(`Added ${ticker} to your watchlist.`);
+}
+
+async function addOwnedFromDiscover(ticker){
+  const s = DISCOVER_STOCKS.find(x => x.ticker === ticker);
+  if (!s) return;
+  const sharesStr = prompt(`How many shares of ${ticker} do you own?`, '1');
+  if (sharesStr === null) return;
+  const shares = parseFloat(sharesStr) || 1;
+  const costStr = prompt(`What price did you pay per share for ${ticker}? (Leave blank to fill in later)`, '');
+  const cost = parseFloat(costStr) || 0;
+  state.holdings.push({
+    id: uid(), ticker: s.ticker, name: s.name, shares, costBasis: cost,
+    currentPrice: state.discoverPrices[s.ticker] ? state.discoverPrices[s.ticker].price : cost,
+    changePct: state.discoverPrices[s.ticker] ? state.discoverPrices[s.ticker].changePct : 0,
+    purchaseDate: '', insight: null
+  });
+  await saveState();
+  renderContentOnly();
+  showToast(`Added ${ticker} to your portfolio.`);
 }
 
 function addCardHtml(list){
