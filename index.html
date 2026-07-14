@@ -540,6 +540,45 @@ const SUPABASE_URL = 'https://etprvicvwxudexzkkkrf.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_vUJ4QnqmpJnuAN6qR0kmqg_85X_4FIg';
 const SUPABASE_REST = `${SUPABASE_URL}/rest/v1/ledger`;
 
+const ALPHA_VANTAGE_KEY = '6EASXIO49870WEEN';
+function avUrl(fn, symbol){
+  return `https://www.alphavantage.co/query?function=${fn}&symbol=${encodeURIComponent(symbol)}&apikey=${ALPHA_VANTAGE_KEY}`;
+}
+function isRateLimited(json){
+  return !!(json && (json['Note'] || json['Information']));
+}
+async function fetchQuote(ticker){
+  const res = await fetch(avUrl('GLOBAL_QUOTE', ticker));
+  const json = await res.json();
+  if (isRateLimited(json)) throw new Error('RATE_LIMIT');
+  const q = json['Global Quote'];
+  if (!q || !q['05. price']) throw new Error('NO_DATA');
+  return {
+    price: parseFloat(q['05. price']),
+    changePct: parseFloat((q['10. change percent'] || '0').replace('%', ''))
+  };
+}
+async function fetchOverview(ticker){
+  const res = await fetch(avUrl('OVERVIEW', ticker));
+  const json = await res.json();
+  if (isRateLimited(json)) throw new Error('RATE_LIMIT');
+  if (!json || !json.Symbol) throw new Error('NO_DATA');
+  const divYield = parseFloat(json.DividendYield);
+  const divPerShare = parseFloat(json.DividendPerShare);
+  return {
+    name: json.Name || '',
+    dividendYield: isNaN(divYield) ? 0 : divYield * 100,
+    dividendPerShare: isNaN(divPerShare) ? 0 : divPerShare,
+    peRatio: json.PERatio,
+    analystTarget: json.AnalystTargetPrice,
+    week52High: json['52WeekHigh'],
+    week52Low: json['52WeekLow'],
+    sector: json.Sector,
+    industry: json.Industry
+  };
+}
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
 const STORAGE_KEY = 'ledger-data';
 let state = { holdings: [], watchlist: [], lastRefresh: null, discoverPrices: {} };
 let currentTab = 'portfolio';
@@ -746,33 +785,29 @@ async function loadDividends(){
   if (!state.holdings.length){ showToast('Add a holding first.'); return; }
   const btn = document.getElementById('dividend-refresh-btn');
   if (btn){ btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Loading…'; }
+  let updated = 0;
+  let rateLimited = false;
   try{
-    let updated = 0;
-    // Fetch dividend data one ticker at a time — smaller, more reliable responses
     for (const h of state.holdings){
-      const prompt = `Search for the current dividend yield (as a percent) and the total annual dividend paid per share for the stock ${h.ticker}. If it pays no dividend, use 0 for both. Respond with ONLY a compact raw JSON object, no markdown fences, no commentary, no extra text. Format exactly: {"dividendYield":2.05,"dividendPerShare":3.20}`;
       try{
-        const data = await callClaude(
-          [{ role: 'user', content: prompt }],
-          [{ type: 'web_search_20250305', name: 'web_search' }]
-        );
-        const text = extractText(data).trim();
-        const jsonStart = text.indexOf('{');
-        const jsonEnd = text.lastIndexOf('}');
-        if (jsonStart === -1 || jsonEnd === -1) continue;
-        const parsed = JSON.parse(text.slice(jsonStart, jsonEnd + 1));
-        const y = parseFloat(parsed.dividendYield);
-        const d = parseFloat(parsed.dividendPerShare);
-        h.dividendYield = isNaN(y) ? 0 : y;
-        h.dividendPerShare = isNaN(d) ? 0 : d;
+        const ov = await fetchOverview(h.ticker);
+        h.dividendYield = ov.dividendYield;
+        h.dividendPerShare = ov.dividendPerShare;
+        if (ov.name) h.name = ov.name;
         updated++;
-      }catch(innerErr){
-        console.error(`Dividend lookup failed for ${h.ticker}`, innerErr);
+      }catch(err){
+        if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
+        console.error(`Dividend lookup failed for ${h.ticker}`, err);
       }
+      await sleep(900);
     }
     await saveState();
     render();
-    showToast(`Loaded dividend data for ${updated} of ${state.holdings.length} holdings.`);
+    if (rateLimited){
+      showToast(`Hit Alpha Vantage's daily limit after ${updated}. Try again later.`, 4000);
+    } else {
+      showToast(`Loaded dividend data for ${updated} of ${state.holdings.length} holdings.`);
+    }
   }catch(e){
     console.error(e);
     showToast("Couldn't load dividend data — try again in a moment.");
@@ -820,7 +855,7 @@ function holdingCard(h){
       <span>Gain / loss</span>
       <span class="val ${gain >= 0 ? 'up' : 'down'}">${fmtMoney(gain)} (${fmtPct(gainPct)})</span>
     </div>
-    <button class="btn insight-btn" onclick="getInsight('holdings','${h.id}')">${h.insightLoading ? '<span class="spin"></span>Looking up…' : 'Get outlook'}</button>
+    <button class="btn insight-btn" onclick="getInsight('holdings','${h.id}')">${h.insightLoading ? '<span class="spin"></span>Looking up…' : 'View fundamentals'}</button>
     ${h.insight ? `<div class="insight-text">${h.insight.text}<span class="src">${h.insight.sources || ''}</span></div>` : ''}
   </div>`;
 }
@@ -840,7 +875,7 @@ function watchCard(w){
       <span class="price">${fmtMoney(w.currentPrice)}</span>
       <span class="change ${dayDir}">${fmtPct(w.changePct)} today</span>
     </div>
-    <button class="btn insight-btn" onclick="getInsight('watchlist','${w.id}')">${w.insightLoading ? '<span class="spin"></span>Looking up…' : 'Get outlook'}</button>
+    <button class="btn insight-btn" onclick="getInsight('watchlist','${w.id}')">${w.insightLoading ? '<span class="spin"></span>Looking up…' : 'View fundamentals'}</button>
     ${w.insight ? `<div class="insight-text">${w.insight.text}<span class="src">${w.insight.sources || ''}</span></div>` : ''}
     <button class="btn" style="margin-top:8px; width:100%;" onclick="moveToPortfolio('${w.id}')">Move to portfolio</button>
   </div>`;
@@ -1027,24 +1062,7 @@ async function addItem(list){
   showToast(`Added ${ticker}. Hit Refresh to pull its price.`);
 }
 
-async function callClaude(messages, tools){
-  const body = { model: 'claude-sonnet-4-6', max_tokens: 1000, messages };
-  if (tools) body.tools = tools;
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) throw new Error('API error ' + res.status);
-  return res.json();
-}
 
-function extractText(data){
-  return (data.content || [])
-    .filter(b => b.type === 'text')
-    .map(b => b.text)
-    .join('\n');
-}
 
 async function loadDiscoverPrices(){
   const q = discoverQuery.toLowerCase();
@@ -1058,33 +1076,28 @@ async function loadDiscoverPrices(){
   const btn = document.getElementById('discover-load-btn');
   if (btn){ btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Loading…'; }
 
+  let updated = 0;
+  let rateLimited = false;
   try{
-    // Batch in groups so each request stays well within the response length limit
-    const batchSize = 15;
-    let updated = 0;
-    for (let i = 0; i < filtered.length; i += batchSize){
-      const batch = filtered.slice(i, i + batchSize);
-      const tickers = batch.map(s => s.ticker).join(', ');
-      const prompt = `Look up today's current stock price and percent price change for each of these tickers: ${tickers}. Respond with ONLY a compact raw JSON object, no markdown fences, no commentary, no extra whitespace. Format exactly: {"TICKER":{"price":123.45,"changePct":-1.23},...} Include every ticker.`;
-      const data = await callClaude(
-        [{ role: 'user', content: prompt }],
-        [{ type: 'web_search_20250305', name: 'web_search' }]
-      );
-      const text = extractText(data).trim();
-      const jsonStart = text.indexOf('{');
-      const jsonEnd = text.lastIndexOf('}');
-      if (jsonStart === -1 || jsonEnd === -1) continue;
-      const parsed = JSON.parse(text.slice(jsonStart, jsonEnd + 1));
-      batch.forEach(s => {
-        if (parsed[s.ticker]){
-          state.discoverPrices[s.ticker] = parsed[s.ticker];
-          updated++;
-        }
-      });
+    for (const s of filtered){
+      if (state.discoverPrices[s.ticker]){ updated++; continue; } // already cached, skip a quota hit
+      try{
+        const q2 = await fetchQuote(s.ticker);
+        state.discoverPrices[s.ticker] = q2;
+        updated++;
+      }catch(err){
+        if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
+        console.error(`Price lookup failed for ${s.ticker}`, err);
+      }
+      await sleep(900);
     }
     await saveState();
     renderContentOnly();
-    showToast(`Loaded prices for ${updated} of ${filtered.length} stocks.`);
+    if (rateLimited){
+      showToast(`Hit Alpha Vantage's daily limit after ${updated}. Try again later.`, 4000);
+    } else {
+      showToast(`Loaded prices for ${updated} of ${filtered.length} stocks.`);
+    }
   }catch(e){
     console.error(e);
     showToast("Couldn't load prices — try again in a moment.");
@@ -1099,33 +1112,29 @@ async function refreshPrices(){
   const btn = document.getElementById('refresh-btn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span>Refreshing…';
+  let updated = 0;
+  let rateLimited = false;
   try{
-    const tickers = all.map(x => x.ticker).join(', ');
-    const prompt = `Look up the current stock price, today's percent price change, and full company name for each of these tickers: ${tickers}. After searching, respond with ONLY a raw JSON object and nothing else — no markdown fences, no commentary. Format exactly like this: {"TICKER": {"price": 123.45, "changePct": -1.23, "name": "Company Name"}, ...} Include every ticker requested.`;
-    const data = await callClaude(
-      [{ role: 'user', content: prompt }],
-      [{ type: 'web_search_20250305', name: 'web_search' }]
-    );
-    const text = extractText(data).trim();
-    const jsonStart = text.indexOf('{');
-    const jsonEnd = text.lastIndexOf('}');
-    if (jsonStart === -1 || jsonEnd === -1) throw new Error('No JSON in response');
-    const parsed = JSON.parse(text.slice(jsonStart, jsonEnd + 1));
-
-    let updated = 0;
-    [...state.holdings, ...state.watchlist].forEach(item => {
-      const info = parsed[item.ticker];
-      if (info){
-        item.currentPrice = info.price;
-        item.changePct = info.changePct;
-        if (info.name) item.name = info.name;
+    for (const item of all){
+      try{
+        const q = await fetchQuote(item.ticker);
+        item.currentPrice = q.price;
+        item.changePct = q.changePct;
         updated++;
+      }catch(err){
+        if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
+        console.error(`Price lookup failed for ${item.ticker}`, err);
       }
-    });
+      await sleep(900);
+    }
     state.lastRefresh = new Date().toISOString();
     await saveState();
     render();
-    showToast(`Updated ${updated} of ${all.length} tickers.`);
+    if (rateLimited){
+      showToast(`Hit Alpha Vantage's daily limit after updating ${updated}. Try again later.`, 4000);
+    } else {
+      showToast(`Updated ${updated} of ${all.length} tickers.`);
+    }
   }catch(e){
     console.error(e);
     showToast("Couldn't refresh prices — try again in a moment.");
@@ -1141,19 +1150,23 @@ async function getInsight(list, id){
   item.insightLoading = true;
   render();
   try{
-    const prompt = `Search for the most recent news and analyst sentiment on ${item.ticker} stock. Then write a short, plain-English outlook in 2-3 sentences: what's driving it lately and how analysts generally feel about it. Paraphrase everything in your own words — do not quote any source directly. End your response with a single line starting with "Sources:" followed by 1-3 publication names only (no URLs, no quotes).`;
-    const data = await callClaude(
-      [{ role: 'user', content: prompt }],
-      [{ type: 'web_search_20250305', name: 'web_search' }]
-    );
-    const text = extractText(data).trim();
-    const srcMatch = text.match(/Sources:(.*)$/is);
-    const sources = srcMatch ? 'Sources:' + srcMatch[1].trim() : '';
-    const body = srcMatch ? text.slice(0, srcMatch.index).trim() : text;
-    item.insight = { text: body, sources };
+    const ov = await fetchOverview(item.ticker);
+    if (ov.name) item.name = ov.name;
+    const parts = [];
+    if (ov.sector) parts.push(`${ov.sector}${ov.industry ? ' · ' + ov.industry : ''}`);
+    if (ov.peRatio && ov.peRatio !== 'None') parts.push(`P/E ratio: ${ov.peRatio}`);
+    if (ov.analystTarget && ov.analystTarget !== 'None') parts.push(`Analyst price target: $${ov.analystTarget}`);
+    if (ov.week52High && ov.week52Low && ov.week52High !== 'None') parts.push(`52-week range: $${ov.week52Low} – $${ov.week52High}`);
+    item.insight = {
+      text: parts.length ? parts.join(' · ') : 'No fundamental data available for this ticker.',
+      sources: 'Source: Alpha Vantage'
+    };
   }catch(e){
     console.error(e);
-    item.insight = { text: "Couldn't fetch an outlook right now — try again shortly.", sources: '' };
+    const msg = e.message === 'RATE_LIMIT'
+      ? "Hit Alpha Vantage's daily limit — try again later."
+      : "Couldn't fetch data right now — try again shortly.";
+    item.insight = { text: msg, sources: '' };
   }finally{
     item.insightLoading = false;
     await saveState();
