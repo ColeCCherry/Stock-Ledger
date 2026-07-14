@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ledger — Portfolio & Watchlist</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+:root{
+  --bg: #0E1116;
+  --bg-panel: #161B22;
+  --bg-card: #1B212B;
+  --text: #ECEAE2;
+  --text-dim: #8B92A0;
+  --accent-gold: #D4A24C;
+  --gain: #4FA37D;
+  --loss: #C1554D;
+  --border: #262C36;
+}
+
+*{box-sizing:border-box; margin:0; padding:0;}
+
+body{
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'IBM Plex Sans', sans-serif;
+  min-height: 100vh;
+}
+
+/* ===== Ticker tape ===== */
+.tape-wrap{
+  overflow: hidden;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  padding: 10px 0;
+}
+.tape{
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  animation: scroll-tape 30s linear infinite;
+  padding-left: 100%;
+}
+.tape-wrap:hover .tape{ animation-play-state: paused; }
+@keyframes scroll-tape{
+  from{ transform: translateX(0); }
+  to{ transform: translateX(-100%); }
+}
+.tape .tick{ margin-right: 40px; }
+.tape .up{ color: var(--gain); }
+.tape .down{ color: var(--loss); }
+.tape .flat{ color: var(--text-dim); }
+
+/* ===== Header ===== */
+header{
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 40px 24px 20px;
+}
+.eyebrow{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--accent-gold);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+h1{
+  font-family: 'IBM Plex Serif', serif;
+  font-weight: 600;
+  font-size: 34px;
+  margin-top: 6px;
+}
+.subtitle{
+  color: var(--text-dim);
+  font-size: 14px;
+  margin-top: 6px;
+}
+
+/* ===== Toolbar ===== */
+.toolbar{
+  max-width: 980px;
+  margin: 10px auto 0;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.tabs{
+  display: flex;
+  gap: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+}
+.tab-btn{
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  background: transparent;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.tab-btn.active{
+  background: var(--bg-card);
+  color: var(--text);
+}
+.spacer{ flex: 1; }
+.btn{
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 9px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.btn:hover{ border-color: var(--accent-gold); }
+.btn.primary{
+  background: var(--accent-gold);
+  color: #191510;
+  border-color: var(--accent-gold);
+  font-weight: 600;
+}
+.btn.primary:hover{ filter: brightness(1.08); }
+.btn:disabled{ opacity: 0.5; cursor: default; }
+
+/* ===== Main ===== */
+main{
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px 24px 80px;
+}
+
+.summary-row{
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.summary-card{
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+.summary-label{
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.summary-value{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 22px;
+  margin-top: 6px;
+  font-weight: 500;
+}
+
+.grid{
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.card{
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  position: relative;
+  border-left: 3px solid var(--border);
+}
+.card.gain-border{ border-left-color: var(--gain); }
+.card.loss-border{ border-left-color: var(--loss); }
+
+.card-top{
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.ticker{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.company-name{
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.remove-btn{
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+}
+.remove-btn:hover{ color: var(--loss); }
+
+.price-row{
+  margin-top: 14px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.price{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 24px;
+  font-weight: 600;
+}
+.change{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  font-weight: 500;
+}
+.change.up{ color: var(--gain); }
+.change.down{ color: var(--loss); }
+
+.fields{
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+}
+.field label{
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-family: 'IBM Plex Mono', monospace;
+  display: block;
+  margin-bottom: 3px;
+}
+.field input{
+  width: 100%;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  padding: 6px 8px;
+}
+.field input:focus{ outline: none; border-color: var(--accent-gold); }
+
+.gainloss-row{
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  justify-content: space-between;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+}
+.gainloss-row .val.up{ color: var(--gain); }
+.gainloss-row .val.down{ color: var(--loss); }
+
+.insight-btn{
+  margin-top: 12px;
+  width: 100%;
+  font-size: 12px;
+  padding: 7px;
+}
+.insight-text{
+  margin-top: 10px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  border-top: 1px dashed var(--border);
+  padding-top: 10px;
+}
+.insight-text .src{
+  color: var(--accent-gold);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  display: block;
+  margin-top: 6px;
+}
+
+/* Add card */
+.add-card{
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  justify-content: center;
+}
+.add-card input{
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  padding: 8px 10px;
+}
+.add-card input:focus{ outline: none; border-color: var(--accent-gold); }
+.add-row{ display: flex; gap: 8px; }
+.add-row input{ flex: 1; }
+.add-hint{ font-size: 11px; color: var(--text-dim); }
+
+.discover-controls{
+  display: flex;
+  gap: 10px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.discover-controls input{
+  flex: 1;
+  min-width: 180px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  padding: 9px 12px;
+}
+.discover-controls input:focus{ outline: none; border-color: var(--accent-gold); }
+.discover-controls select{
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  padding: 9px 12px;
+}
+.sector-tag{
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-gold);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 7px;
+  margin-top: 6px;
+}
+.desc{
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  margin-top: 12px;
+}
+.discover-card-foot{
+  margin-top: 14px;
+  display: flex;
+  gap: 8px;
+}
+.discover-card-foot .btn{ flex: 1; font-size: 12px; padding: 8px; }
+.tag-added{
+  font-size: 11px;
+  color: var(--gain);
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.empty{
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text-dim);
+}
+.empty .big{
+  font-family: 'IBM Plex Serif', serif;
+  font-size: 20px;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.toast{
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-panel);
+  border: 1px solid var(--accent-gold);
+  color: var(--text);
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.25s;
+  pointer-events: none;
+  z-index: 50;
+}
+.toast.show{ opacity: 1; }
+
+.spin{
+  display: inline-block;
+  width: 12px; height: 12px;
+  border: 2px solid rgba(255,255,255,0.25);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+@keyframes spin{ to{ transform: rotate(360deg); } }
+
+@media (max-width: 600px){
+  .summary-row{ grid-template-columns: 1fr; }
+  h1{ font-size: 26px; }
+}
+</style>
+</head>
+<body>
+
+<div class="tape-wrap"><div class="tape" id="tape"></div></div>
+
+<header>
+  <div class="eyebrow">Personal Markets Desk</div>
+  <h1>Ledger</h1>
+  <div class="subtitle">Your holdings and watchlist, priced on demand.</div>
+</header>
+
+<div class="toolbar">
+  <div class="tabs">
+    <button class="tab-btn active" id="tab-portfolio" onclick="setTab('portfolio')">Portfolio</button>
+    <button class="tab-btn" id="tab-watchlist" onclick="setTab('watchlist')">Watchlist</button>
+    <button class="tab-btn" id="tab-discover" onclick="setTab('discover')">Discover</button>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn primary" id="refresh-btn" onclick="refreshPrices()">Refresh prices</button>
+</div>
+
+<main>
+  <div class="summary-row" id="summary-row"></div>
+  <div id="content"></div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const SUPABASE_URL = 'https://etprvicvwxudexzkkkrf.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_vUJ4QnqmpJnuAN6qR0kmqg_85X_4FIg';
+const SUPABASE_REST = `${SUPABASE_URL}/rest/v1/ledger`;
+
+const STORAGE_KEY = 'ledger-data';
+let state = { holdings: [], watchlist: [], lastRefresh: null, discoverPrices: {} };
+let currentTab = 'portfolio';
+let uidCounter = 1;
+let discoverQuery = '';
+let discoverSector = 'All';
+
+const DISCOVER_STOCKS = [
+  { ticker: 'AAPL', name: 'Apple Inc.', sector: 'Technology', desc: 'Designs the iPhone, Mac, iPad, and Watch, and runs the App Store and other services that generate recurring revenue from its device install base.' },
+  { ticker: 'MSFT', name: 'Microsoft Corp.', sector: 'Technology', desc: 'Sells the Windows operating system and Office productivity suite, and operates the Azure cloud platform alongside a fast-growing AI and enterprise software business.' },
+  { ticker: 'NVDA', name: 'NVIDIA Corp.', sector: 'Technology', desc: 'Designs the graphics processors that power gaming PCs and, increasingly, the data-center chips used to train and run AI models.' },
+  { ticker: 'GOOGL', name: 'Alphabet Inc.', sector: 'Technology', desc: 'Parent of Google Search, YouTube, and Android, with a growing cloud-computing arm and heavy investment in AI products like Gemini.' },
+  { ticker: 'META', name: 'Meta Platforms Inc.', sector: 'Technology', desc: 'Owns Facebook, Instagram, and WhatsApp, earning most of its revenue from advertising while investing heavily in AI and virtual/augmented reality.' },
+  { ticker: 'AMZN', name: 'Amazon.com Inc.', sector: 'Consumer', desc: 'Runs the largest e-commerce marketplace in the US along with Amazon Web Services, a major cloud-computing provider that drives most of its profit.' },
+  { ticker: 'TSLA', name: 'Tesla Inc.', sector: 'Consumer', desc: 'Makes electric vehicles and battery storage systems, and is developing self-driving software and robotics alongside its car business.' },
+  { ticker: 'NFLX', name: 'Netflix Inc.', sector: 'Communication', desc: 'Operates a subscription video-streaming service with original films and series distributed to members in over 190 countries.' },
+  { ticker: 'DIS', name: 'Walt Disney Co.', sector: 'Communication', desc: 'Owns film studios, theme parks, and the Disney+ and ESPN streaming services, spanning entertainment content and experiences.' },
+  { ticker: 'JPM', name: 'JPMorgan Chase & Co.', sector: 'Financials', desc: 'The largest US bank by assets, offering consumer banking, credit cards, investment banking, and asset management.' },
+  { ticker: 'V', name: 'Visa Inc.', sector: 'Financials', desc: 'Operates the payment network that banks and merchants use to process card transactions, earning fees on the volume that flows through it.' },
+  { ticker: 'BRK.B', name: 'Berkshire Hathaway Inc.', sector: 'Financials', desc: 'A holding company run by Warren Buffett that owns insurance businesses, railroads, utilities, and large equity stakes in public companies.' },
+  { ticker: 'JNJ', name: 'Johnson & Johnson', sector: 'Healthcare', desc: 'A pharmaceutical and medical-device company that develops prescription drugs, vaccines, and surgical and diagnostic equipment.' },
+  { ticker: 'UNH', name: 'UnitedHealth Group Inc.', sector: 'Healthcare', desc: 'The largest US health insurer, also operating Optum, a division that provides pharmacy benefits and health-care services.' },
+  { ticker: 'PFE', name: 'Pfizer Inc.', sector: 'Healthcare', desc: 'A pharmaceutical maker known for vaccines and treatments across oncology, cardiology, and infectious disease.' },
+  { ticker: 'XOM', name: 'Exxon Mobil Corp.', sector: 'Energy', desc: 'Explores for and produces oil and natural gas, and refines and markets fuels and chemicals worldwide.' },
+  { ticker: 'CVX', name: 'Chevron Corp.', sector: 'Energy', desc: 'An integrated energy company that explores for, produces, refines, and markets oil, gas, and chemical products globally.' },
+  { ticker: 'KO', name: 'Coca-Cola Co.', sector: 'Consumer Staples', desc: 'Makes and markets a portfolio of soft drinks, juices, and water brands sold through bottling partners around the world.' },
+  { ticker: 'PEP', name: 'PepsiCo Inc.', sector: 'Consumer Staples', desc: 'Sells beverages and snack foods, pairing Pepsi and Gatorade drinks with brands like Lay\'s and Doritos.' },
+  { ticker: 'WMT', name: 'Walmart Inc.', sector: 'Consumer Staples', desc: 'The world\'s largest retailer by revenue, operating discount stores, supercenters, and a growing e-commerce business.' },
+  { ticker: 'COST', name: 'Costco Wholesale Corp.', sector: 'Consumer Staples', desc: 'Runs membership-only warehouse clubs that sell groceries and general merchandise in bulk at low markups.' },
+  { ticker: 'MCD', name: "McDonald's Corp.", sector: 'Consumer', desc: 'Franchises and operates fast-food restaurants worldwide, earning most of its profit from rent and royalties paid by franchisees.' },
+  { ticker: 'NKE', name: 'Nike Inc.', sector: 'Consumer', desc: 'Designs and markets athletic footwear, apparel, and equipment sold globally through retail partners and its own stores.' },
+  { ticker: 'BA', name: 'Boeing Co.', sector: 'Industrials', desc: 'Builds commercial airplanes and defense, space, and security systems for airlines, governments, and militaries.' },
+  { ticker: 'CAT', name: 'Caterpillar Inc.', sector: 'Industrials', desc: 'Manufactures construction and mining equipment along with engines and turbines used across heavy industry.' },
+  { ticker: 'AMD', name: 'Advanced Micro Devices Inc.', sector: 'Technology', desc: 'Designs computer processors and graphics chips, competing with Intel in PCs and servers and with NVIDIA in AI hardware.' },
+  { ticker: 'CRM', name: 'Salesforce Inc.', sector: 'Technology', desc: 'Sells cloud-based customer relationship management software that businesses use to manage sales, service, and marketing.' },
+  { ticker: 'ORCL', name: 'Oracle Corp.', sector: 'Technology', desc: 'Sells database software and increasingly cloud infrastructure and applications used by large enterprises.' }
+];
+
+function uid(){ return 'id' + (uidCounter++) + '-' + Date.now().toString(36); }
+
+function fmtMoney(n){
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  return '$' + Number(n).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+function fmtPct(n){
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  const s = n >= 0 ? '+' : '';
+  return s + n.toFixed(2) + '%';
+}
+
+function showToast(msg, ms=2600){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(showToast._h);
+  showToast._h = setTimeout(()=> t.classList.remove('show'), ms);
+}
+
+async function loadState(){
+  try{
+    const res = await fetch(`${SUPABASE_REST}?id=eq.main&select=data`, {
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`
+      }
+    });
+    if (!res.ok) throw new Error('Supabase load error ' + res.status);
+    const rows = await res.json();
+    if (rows && rows.length && rows[0].data && Object.keys(rows[0].data).length){
+      state = Object.assign({holdings:[], watchlist:[], lastRefresh:null, discoverPrices:{}}, rows[0].data);
+      return true;
+    }
+  }catch(e){
+    console.error('loadState error', e);
+    showToast("Couldn't reach the cloud database — check your connection.");
+  }
+  return false;
+}
+
+async function saveState(){
+  try{
+    const res = await fetch(`${SUPABASE_REST}?id=eq.main`, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ data: state, updated_at: new Date().toISOString() })
+    });
+    if (!res.ok) throw new Error('Supabase save error ' + res.status);
+  }catch(e){
+    showToast("Couldn't save to the cloud — check your connection.");
+    console.error(e);
+  }
+}
+
+function seedDefaults(){
+  state.holdings = [
+    { id: uid(), ticker: 'GOOGL', name: 'Alphabet Inc.', shares: 1, costBasis: 357.18, currentPrice: 357.18, prevClose: 358.89, changePct: -0.48, purchaseDate: '', insight: null },
+    { id: uid(), ticker: 'CVX', name: 'Chevron Corp.', shares: 1, costBasis: 180.25, currentPrice: 180.25, prevClose: 176.33, changePct: 2.22, purchaseDate: '', insight: null }
+  ];
+  state.watchlist = [];
+  state.lastRefresh = new Date().toISOString();
+}
+
+function setTab(tab){
+  currentTab = tab;
+  document.getElementById('tab-portfolio').classList.toggle('active', tab === 'portfolio');
+  document.getElementById('tab-watchlist').classList.toggle('active', tab === 'watchlist');
+  document.getElementById('tab-discover').classList.toggle('active', tab === 'discover');
+  render();
+}
+
+function totals(){
+  let invested = 0, value = 0;
+  state.holdings.forEach(h => {
+    invested += (h.costBasis || 0) * (h.shares || 0);
+    value += (h.currentPrice || 0) * (h.shares || 0);
+  });
+  return { invested, value, gain: value - invested, gainPct: invested ? ((value - invested) / invested * 100) : 0 };
+}
+
+function renderTape(){
+  const all = [...state.holdings, ...state.watchlist];
+  const tape = document.getElementById('tape');
+  if (!all.length){ tape.innerHTML = '<span class="tick flat">Add a stock to see it here</span>'.repeat(4); return; }
+  let html = '';
+  for (let i=0;i<4;i++){
+    all.forEach(s => {
+      const dir = (s.changePct > 0) ? 'up' : (s.changePct < 0 ? 'down' : 'flat');
+      const arrow = dir === 'up' ? '▲' : (dir === 'down' ? '▼' : '·');
+      html += `<span class="tick ${dir}">${s.ticker} ${fmtMoney(s.currentPrice)} ${arrow} ${fmtPct(s.changePct)}</span>`;
+    });
+  }
+  tape.innerHTML = html;
+}
+
+function renderSummary(){
+  const t = totals();
+  const row = document.getElementById('summary-row');
+  if (currentTab !== 'portfolio'){ row.innerHTML = ''; return; }
+  const gainClass = t.gain >= 0 ? 'up' : 'down';
+  row.innerHTML = `
+    <div class="summary-card">
+      <div class="summary-label">Invested</div>
+      <div class="summary-value">${fmtMoney(t.invested)}</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">Current value</div>
+      <div class="summary-value">${fmtMoney(t.value)}</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">Total gain / loss</div>
+      <div class="summary-value" style="color:var(--${t.gain >= 0 ? 'gain' : 'loss'})">${fmtMoney(t.gain)} (${fmtPct(t.gainPct)})</div>
+    </div>
+  `;
+}
+
+function holdingCard(h){
+  const value = (h.currentPrice || 0) * (h.shares || 0);
+  const invested = (h.costBasis || 0) * (h.shares || 0);
+  const gain = value - invested;
+  const gainPct = invested ? (gain / invested * 100) : 0;
+  const borderClass = gain > 0 ? 'gain-border' : (gain < 0 ? 'loss-border' : '');
+  const dayDir = h.changePct > 0 ? 'up' : (h.changePct < 0 ? 'down' : '');
+  return `
+  <div class="card ${borderClass}">
+    <div class="card-top">
+      <div>
+        <div class="ticker">${h.ticker}</div>
+        <div class="company-name">${h.name || ''}</div>
+      </div>
+      <button class="remove-btn" onclick="removeItem('holdings','${h.id}')" title="Remove">✕</button>
+    </div>
+    <div class="price-row">
+      <span class="price">${fmtMoney(h.currentPrice)}</span>
+      <span class="change ${dayDir}">${fmtPct(h.changePct)} today</span>
+    </div>
+    <div class="fields">
+      <div class="field">
+        <label>Shares</label>
+        <input type="number" min="0" step="any" value="${h.shares}" onchange="updateField('holdings','${h.id}','shares', this.value)">
+      </div>
+      <div class="field">
+        <label>Cost basis / share</label>
+        <input type="number" min="0" step="any" value="${h.costBasis}" onchange="updateField('holdings','${h.id}','costBasis', this.value)">
+      </div>
+      <div class="field" style="grid-column: 1 / -1;">
+        <label>Date purchased</label>
+        <input type="date" value="${h.purchaseDate || ''}" onchange="updateTextField('holdings','${h.id}','purchaseDate', this.value)">
+      </div>
+    </div>
+    <div class="gainloss-row">
+      <span>Gain / loss</span>
+      <span class="val ${gain >= 0 ? 'up' : 'down'}">${fmtMoney(gain)} (${fmtPct(gainPct)})</span>
+    </div>
+    <button class="btn insight-btn" onclick="getInsight('holdings','${h.id}')">${h.insightLoading ? '<span class="spin"></span>Looking up…' : 'Get outlook'}</button>
+    ${h.insight ? `<div class="insight-text">${h.insight.text}<span class="src">${h.insight.sources || ''}</span></div>` : ''}
+  </div>`;
+}
+
+function watchCard(w){
+  const dayDir = w.changePct > 0 ? 'up' : (w.changePct < 0 ? 'down' : '');
+  return `
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <div class="ticker">${w.ticker}</div>
+        <div class="company-name">${w.name || ''}</div>
+      </div>
+      <button class="remove-btn" onclick="removeItem('watchlist','${w.id}')" title="Remove">✕</button>
+    </div>
+    <div class="price-row">
+      <span class="price">${fmtMoney(w.currentPrice)}</span>
+      <span class="change ${dayDir}">${fmtPct(w.changePct)} today</span>
+    </div>
+    <button class="btn insight-btn" onclick="getInsight('watchlist','${w.id}')">${w.insightLoading ? '<span class="spin"></span>Looking up…' : 'Get outlook'}</button>
+    ${w.insight ? `<div class="insight-text">${w.insight.text}<span class="src">${w.insight.sources || ''}</span></div>` : ''}
+    <button class="btn" style="margin-top:8px; width:100%;" onclick="moveToPortfolio('${w.id}')">Move to portfolio</button>
+  </div>`;
+}
+
+function discoverCard(s){
+  const inWatchlist = state.watchlist.some(x => x.ticker === s.ticker);
+  const inPortfolio = state.holdings.some(x => x.ticker === s.ticker);
+  const already = inWatchlist || inPortfolio;
+  const p = state.discoverPrices[s.ticker];
+  const dayDir = p && p.changePct > 0 ? 'up' : (p && p.changePct < 0 ? 'down' : '');
+  const priceRow = p
+    ? `<div class="price-row"><span class="price">${fmtMoney(p.price)}</span><span class="change ${dayDir}">${fmtPct(p.changePct)} today</span></div>`
+    : `<div class="price-row"><span class="change" style="color:var(--text-dim)">Price not loaded yet</span></div>`;
+  return `
+  <div class="card">
+    <div class="card-top">
+      <div>
+        <div class="ticker">${s.ticker}</div>
+        <div class="company-name">${s.name}</div>
+        <div class="sector-tag">${s.sector}</div>
+      </div>
+    </div>
+    ${priceRow}
+    <div class="desc">${s.desc}</div>
+    <div class="discover-card-foot">
+      ${already
+        ? `<span class="tag-added">✓ ${inPortfolio ? 'In portfolio' : 'On watchlist'}</span>`
+        : `<button class="btn primary" onclick="addFromDiscover('${s.ticker}')">Add to watchlist</button>`}
+    </div>
+  </div>`;
+}
+
+function renderDiscover(){
+  const sectors = ['All', ...new Set(DISCOVER_STOCKS.map(s => s.sector))];
+  const q = discoverQuery.toLowerCase();
+  const filtered = DISCOVER_STOCKS.filter(s => {
+    const matchesQuery = !q || s.ticker.toLowerCase().includes(q) || s.name.toLowerCase().includes(q);
+    const matchesSector = discoverSector === 'All' || s.sector === discoverSector;
+    return matchesQuery && matchesSector;
+  });
+  const controls = `
+    <div class="discover-controls">
+      <input id="discover-search" placeholder="Search by ticker or company name…" value="${discoverQuery}" oninput="onDiscoverSearch(this.value)">
+      <select id="discover-sector" onchange="onDiscoverSector(this.value)">
+        ${sectors.map(sec => `<option value="${sec}" ${sec === discoverSector ? 'selected' : ''}>${sec}</option>`).join('')}
+      </select>
+      <button class="btn" id="discover-load-btn" onclick="loadDiscoverPrices()">Load prices</button>
+    </div>`;
+  const cards = filtered.length
+    ? `<div class="grid">${filtered.map(discoverCard).join('')}</div>`
+    : `<div class="empty"><div class="big">No matches</div>Try a different search or sector.</div>`;
+  return controls + cards;
+}
+
+function onDiscoverSearch(v){ discoverQuery = v; renderContentOnly(); }
+function onDiscoverSector(v){ discoverSector = v; renderContentOnly(); }
+
+function renderContentOnly(){
+  document.getElementById('content').innerHTML = renderDiscover();
+}
+
+function addFromDiscover(ticker){
+  const s = DISCOVER_STOCKS.find(x => x.ticker === ticker);
+  if (!s) return;
+  state.watchlist.push({ id: uid(), ticker: s.ticker, name: s.name, currentPrice: null, changePct: null, insight: null });
+  saveState();
+  renderContentOnly();
+  showToast(`Added ${ticker} to your watchlist.`);
+}
+
+function addCardHtml(list){
+  return `
+  <div class="add-card">
+    <div class="add-row">
+      <input id="add-ticker-${list}" placeholder="Ticker, e.g. AAPL" maxlength="8">
+    </div>
+    ${list === 'holdings' ? `
+    <div class="add-row">
+      <input id="add-shares-${list}" type="number" min="0" step="any" placeholder="Shares">
+      <input id="add-cost-${list}" type="number" min="0" step="any" placeholder="Cost basis / share">
+    </div>
+    <div class="add-row">
+      <input id="add-date-${list}" type="date" placeholder="Date purchased">
+    </div>` : ''}
+    <button class="btn primary" onclick="addItem('${list}')">Add ${list === 'holdings' ? 'holding' : 'to watchlist'}</button>
+    <div class="add-hint">Prices fill in after you hit Refresh.</div>
+  </div>`;
+}
+
+function render(){
+  renderTape();
+  renderSummary();
+  const content = document.getElementById('content');
+  if (currentTab === 'portfolio'){
+    const cards = state.holdings.map(holdingCard).join('');
+    content.innerHTML = `<div class="grid">${cards}${addCardHtml('holdings')}</div>`;
+  } else if (currentTab === 'watchlist'){
+    if (!state.watchlist.length){
+      content.innerHTML = `<div class="grid">${addCardHtml('watchlist')}</div>`;
+    } else {
+      const cards = state.watchlist.map(watchCard).join('');
+      content.innerHTML = `<div class="grid">${cards}${addCardHtml('watchlist')}</div>`;
+    }
+  } else if (currentTab === 'discover'){
+    content.innerHTML = renderDiscover();
+  }
+}
+
+function updateField(list, id, field, value){
+  const item = state[list].find(x => x.id === id);
+  if (!item) return;
+  item[field] = parseFloat(value) || 0;
+  saveState();
+  render();
+}
+
+function updateTextField(list, id, field, value){
+  const item = state[list].find(x => x.id === id);
+  if (!item) return;
+  item[field] = value;
+  saveState();
+  showToast('Saved.');
+}
+
+function removeItem(list, id){
+  state[list] = state[list].filter(x => x.id !== id);
+  saveState();
+  render();
+}
+
+function moveToPortfolio(id){
+  const item = state.watchlist.find(x => x.id === id);
+  if (!item) return;
+  state.watchlist = state.watchlist.filter(x => x.id !== id);
+  state.holdings.push(Object.assign({shares: 1, costBasis: item.currentPrice || 0, purchaseDate: ''}, item));
+  saveState();
+  setTab('portfolio');
+}
+
+async function addItem(list){
+  const tickerInput = document.getElementById(`add-ticker-${list}`);
+  const ticker = (tickerInput.value || '').trim().toUpperCase();
+  if (!ticker){ showToast('Enter a ticker first.'); return; }
+  const exists = state.holdings.concat(state.watchlist).some(x => x.ticker === ticker);
+  if (exists){ showToast(`${ticker} is already on a list.`); return; }
+
+  const item = { id: uid(), ticker, name: '', currentPrice: null, changePct: null, insight: null };
+  if (list === 'holdings'){
+    const shares = parseFloat(document.getElementById('add-shares-holdings').value) || 1;
+    const cost = parseFloat(document.getElementById('add-cost-holdings').value) || 0;
+    const date = document.getElementById('add-date-holdings').value || '';
+    item.shares = shares;
+    item.costBasis = cost;
+    item.purchaseDate = date;
+  }
+  state[list].push(item);
+  saveState();
+  render();
+  showToast(`Added ${ticker}. Hit Refresh to pull its price.`);
+}
+
+async function callClaude(messages, tools){
+  const body = { model: 'claude-sonnet-4-6', max_tokens: 1000, messages };
+  if (tools) body.tools = tools;
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) throw new Error('API error ' + res.status);
+  return res.json();
+}
+
+function extractText(data){
+  return (data.content || [])
+    .filter(b => b.type === 'text')
+    .map(b => b.text)
+    .join('\n');
+}
+
+async function loadDiscoverPrices(){
+  const q = discoverQuery.toLowerCase();
+  const filtered = DISCOVER_STOCKS.filter(s => {
+    const matchesQuery = !q || s.ticker.toLowerCase().includes(q) || s.name.toLowerCase().includes(q);
+    const matchesSector = discoverSector === 'All' || s.sector === discoverSector;
+    return matchesQuery && matchesSector;
+  });
+  if (!filtered.length){ showToast('No stocks to load.'); return; }
+
+  const btn = document.getElementById('discover-load-btn');
+  if (btn){ btn.disabled = true; btn.innerHTML = '<span class="spin"></span>Loading…'; }
+
+  try{
+    // Batch in groups so each request stays well within the response length limit
+    const batchSize = 15;
+    let updated = 0;
+    for (let i = 0; i < filtered.length; i += batchSize){
+      const batch = filtered.slice(i, i + batchSize);
+      const tickers = batch.map(s => s.ticker).join(', ');
+      const prompt = `Look up today's current stock price and percent price change for each of these tickers: ${tickers}. Respond with ONLY a compact raw JSON object, no markdown fences, no commentary, no extra whitespace. Format exactly: {"TICKER":{"price":123.45,"changePct":-1.23},...} Include every ticker.`;
+      const data = await callClaude(
+        [{ role: 'user', content: prompt }],
+        [{ type: 'web_search_20250305', name: 'web_search' }]
+      );
+      const text = extractText(data).trim();
+      const jsonStart = text.indexOf('{');
+      const jsonEnd = text.lastIndexOf('}');
+      if (jsonStart === -1 || jsonEnd === -1) continue;
+      const parsed = JSON.parse(text.slice(jsonStart, jsonEnd + 1));
+      batch.forEach(s => {
+        if (parsed[s.ticker]){
+          state.discoverPrices[s.ticker] = parsed[s.ticker];
+          updated++;
+        }
+      });
+    }
+    await saveState();
+    renderContentOnly();
+    showToast(`Loaded prices for ${updated} of ${filtered.length} stocks.`);
+  }catch(e){
+    console.error(e);
+    showToast("Couldn't load prices — try again in a moment.");
+  }finally{
+    if (btn){ btn.disabled = false; btn.innerHTML = 'Load prices'; }
+  }
+}
+
+async function refreshPrices(){
+  const all = [...state.holdings, ...state.watchlist];
+  if (!all.length){ showToast('Add a stock first.'); return; }
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span>Refreshing…';
+  try{
+    const tickers = all.map(x => x.ticker).join(', ');
+    const prompt = `Look up the current stock price, today's percent price change, and full company name for each of these tickers: ${tickers}. After searching, respond with ONLY a raw JSON object and nothing else — no markdown fences, no commentary. Format exactly like this: {"TICKER": {"price": 123.45, "changePct": -1.23, "name": "Company Name"}, ...} Include every ticker requested.`;
+    const data = await callClaude(
+      [{ role: 'user', content: prompt }],
+      [{ type: 'web_search_20250305', name: 'web_search' }]
+    );
+    const text = extractText(data).trim();
+    const jsonStart = text.indexOf('{');
+    const jsonEnd = text.lastIndexOf('}');
+    if (jsonStart === -1 || jsonEnd === -1) throw new Error('No JSON in response');
+    const parsed = JSON.parse(text.slice(jsonStart, jsonEnd + 1));
+
+    let updated = 0;
+    [...state.holdings, ...state.watchlist].forEach(item => {
+      const info = parsed[item.ticker];
+      if (info){
+        item.currentPrice = info.price;
+        item.changePct = info.changePct;
+        if (info.name) item.name = info.name;
+        updated++;
+      }
+    });
+    state.lastRefresh = new Date().toISOString();
+    await saveState();
+    render();
+    showToast(`Updated ${updated} of ${all.length} tickers.`);
+  }catch(e){
+    console.error(e);
+    showToast("Couldn't refresh prices — try again in a moment.");
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = 'Refresh prices';
+  }
+}
+
+async function getInsight(list, id){
+  const item = state[list].find(x => x.id === id);
+  if (!item) return;
+  item.insightLoading = true;
+  render();
+  try{
+    const prompt = `Search for the most recent news and analyst sentiment on ${item.ticker} stock. Then write a short, plain-English outlook in 2-3 sentences: what's driving it lately and how analysts generally feel about it. Paraphrase everything in your own words — do not quote any source directly. End your response with a single line starting with "Sources:" followed by 1-3 publication names only (no URLs, no quotes).`;
+    const data = await callClaude(
+      [{ role: 'user', content: prompt }],
+      [{ type: 'web_search_20250305', name: 'web_search' }]
+    );
+    const text = extractText(data).trim();
+    const srcMatch = text.match(/Sources:(.*)$/is);
+    const sources = srcMatch ? 'Sources:' + srcMatch[1].trim() : '';
+    const body = srcMatch ? text.slice(0, srcMatch.index).trim() : text;
+    item.insight = { text: body, sources };
+  }catch(e){
+    console.error(e);
+    item.insight = { text: "Couldn't fetch an outlook right now — try again shortly.", sources: '' };
+  }finally{
+    item.insightLoading = false;
+    await saveState();
+    render();
+  }
+}
+
+(async function init(){
+  const had = await loadState();
+  if (!had) { seedDefaults(); await saveState(); }
+  render();
+})();
+</script>
+</body>
+</html>
