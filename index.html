@@ -1624,6 +1624,7 @@ async function dailyAutoRun(){
           item.changePct = q.changePct;
           changed++;
         }
+        await attachAnalystTrend(item, item.ticker);
       }catch(err){
         if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
         console.error(`Daily check failed for ${item.ticker}`, err);
