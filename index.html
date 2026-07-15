@@ -1113,14 +1113,19 @@ async function refreshPrices(){
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span>Refreshing…';
   let updated = 0;
+  let unchanged = 0;
   let rateLimited = false;
   try{
     for (const item of all){
       try{
         const q = await fetchQuote(item.ticker);
-        item.currentPrice = q.price;
-        item.changePct = q.changePct;
-        updated++;
+        if (isMeaningfulChange(item.currentPrice, q.price)){
+          item.currentPrice = q.price;
+          item.changePct = q.changePct;
+          updated++;
+        } else {
+          unchanged++;
+        }
       }catch(err){
         if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
         console.error(`Price lookup failed for ${item.ticker}`, err);
@@ -1133,7 +1138,7 @@ async function refreshPrices(){
     if (rateLimited){
       showToast(`Hit Alpha Vantage's daily limit after updating ${updated}. Try again later.`, 4000);
     } else {
-      showToast(`Updated ${updated} of ${all.length} tickers.`);
+      showToast(`Updated ${updated}${unchanged ? `, ${unchanged} barely moved` : ''} of ${all.length} tickers.`);
     }
   }catch(e){
     console.error(e);
@@ -1178,21 +1183,37 @@ function todayStr(){
   return new Date().toISOString().slice(0, 10);
 }
 
-async function autoFetchDiscover(){
+// A price move under this % is treated as noise — display and storage are left untouched to avoid wasted writes.
+const MEANINGFUL_CHANGE_PCT = 0.03;
+function isMeaningfulChange(oldPrice, newPrice){
+  if (oldPrice === null || oldPrice === undefined || isNaN(oldPrice)) return true;
+  if (oldPrice === 0) return newPrice !== 0;
+  const pct = Math.abs(newPrice - oldPrice) / Math.abs(oldPrice) * 100;
+  return pct >= MEANINGFUL_CHANGE_PCT;
+}
+
+async function autoFetchDiscover(limit){
+  if (limit <= 0) return { fetched: 0, rateLimited: false };
   // Prioritize tickers with no cached data yet; once everything's cached, refresh the stalest entries.
   const uncached = DISCOVER_STOCKS.filter(s => !state.discoverPrices[s.ticker]);
   const cachedBystale = DISCOVER_STOCKS
     .filter(s => state.discoverPrices[s.ticker])
     .sort((a, b) => (state.discoverPrices[a.ticker].ts || 0) - (state.discoverPrices[b.ticker].ts || 0));
-  const queue = [...uncached, ...cachedBystale].slice(0, 25);
-  if (!queue.length) return;
+  const queue = [...uncached, ...cachedBystale].slice(0, limit);
+  if (!queue.length) return { fetched: 0, rateLimited: false };
 
   let fetched = 0;
   let rateLimited = false;
   for (const s of queue){
     try{
       const q = await fetchQuote(s.ticker);
-      state.discoverPrices[s.ticker] = { price: q.price, changePct: q.changePct, ts: Date.now() };
+      const entry = state.discoverPrices[s.ticker] || {};
+      if (isMeaningfulChange(entry.price, q.price)){
+        entry.price = q.price;
+        entry.changePct = q.changePct;
+      }
+      entry.ts = Date.now(); // mark as checked today either way, so we don't re-check it again before other stocks
+      state.discoverPrices[s.ticker] = entry;
       fetched++;
       if (currentTab === 'discover') renderContentOnly();
     }catch(err){
@@ -1201,13 +1222,50 @@ async function autoFetchDiscover(){
     }
     await sleep(900);
   }
-  state.lastAutoFetchDate = todayStr();
-  await saveState();
-  if (fetched > 0){
-    showToast(`Auto-loaded today's prices for ${fetched} Discover stock${fetched === 1 ? '' : 's'}.`, 3500);
+  return { fetched, rateLimited };
+}
+
+async function dailyAutoRun(){
+  if (state.lastAutoRunDate === todayStr()) return; // already ran today
+  const portfolioItems = [...state.holdings, ...state.watchlist];
+  let checked = 0;
+  let changed = 0;
+  let rateLimited = false;
+
+  // 1. Your own stocks first — always take priority for the daily quota.
+  for (const item of portfolioItems){
+    try{
+      const q = await fetchQuote(item.ticker);
+      checked++;
+      if (isMeaningfulChange(item.currentPrice, q.price)){
+        item.currentPrice = q.price;
+        item.changePct = q.changePct;
+        changed++;
+      }
+    }catch(err){
+      if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
+      console.error(`Daily check failed for ${item.ticker}`, err);
+    }
+    await sleep(900);
   }
-  if (rateLimited){
-    showToast(`Hit Alpha Vantage's daily limit after ${fetched} auto-loads.`, 3500);
+  if (changed > 0) render();
+
+  // 2. Whatever's left of the daily budget goes to Discover.
+  let discoverResult = { fetched: 0, rateLimited: false };
+  if (!rateLimited){
+    const remaining = Math.max(0, 25 - checked);
+    discoverResult = await autoFetchDiscover(remaining);
+  }
+
+  state.lastAutoRunDate = todayStr();
+  await saveState();
+
+  const bits = [];
+  if (portfolioItems.length) bits.push(`checked your ${portfolioItems.length} stock${portfolioItems.length === 1 ? '' : 's'} (${changed} moved)`);
+  if (discoverResult.fetched) bits.push(`loaded ${discoverResult.fetched} new Discover price${discoverResult.fetched === 1 ? '' : 's'}`);
+  if (bits.length) showToast('Today: ' + bits.join(', ') + '.', 4000);
+  if (rateLimited || discoverResult.rateLimited){
+    showToast("Hit Alpha Vantage's daily limit — picks up where it left off tomorrow.", 4000);
   }
 }
 
@@ -1215,8 +1273,8 @@ async function autoFetchDiscover(){
   const had = await loadState();
   if (!had) { seedDefaults(); await saveState(); }
   render();
-  if (state.lastAutoFetchDate !== todayStr()){
-    autoFetchDiscover(); // fire and forget — runs in the background, doesn't block the UI
+  if (state.lastAutoRunDate !== todayStr()){
+    dailyAutoRun(); // fire and forget — runs in the background, doesn't block the UI
   }
 })();
 </script>
