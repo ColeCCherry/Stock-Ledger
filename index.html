@@ -460,6 +460,109 @@ main{
   .dividend-panel{ position: static; }
 }
 
+.chart-overlay{
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+}
+.chart-overlay.open{ display: flex; }
+.chart-modal{
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px;
+  width: 100%;
+  max-width: 640px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.chart-modal-head{
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 4px;
+}
+.chart-modal-head .ct-ticker{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 20px;
+  font-weight: 600;
+}
+.chart-modal-head .ct-name{
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.chart-modal-head .ct-close{
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  cursor: pointer;
+  line-height: 1;
+}
+.chart-modal-head .ct-close:hover{ color: var(--text); }
+.chart-current-price{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 26px;
+  font-weight: 600;
+  margin: 10px 0 4px;
+}
+.chart-range-tabs{
+  display: flex;
+  gap: 6px;
+  margin: 14px 0;
+  flex-wrap: wrap;
+}
+.chart-range-tabs button{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.chart-range-tabs button.active{
+  background: var(--accent-gold);
+  color: #191510;
+  border-color: var(--accent-gold);
+  font-weight: 600;
+}
+.chart-svg-wrap{
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+}
+.chart-meta{
+  display: flex;
+  justify-content: space-between;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 8px;
+}
+.chart-loading, .chart-error{
+  text-align: center;
+  padding: 50px 10px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.ticker.clickable{
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.15s;
+}
+.ticker.clickable:hover{ text-decoration-color: var(--accent-gold); }
+
 .empty{
   text-align: center;
   padding: 60px 20px;
@@ -536,6 +639,10 @@ main{
 
 <div class="toast" id="toast"></div>
 
+<div class="chart-overlay" id="chart-overlay" onclick="if(event.target===this) closeChart()">
+  <div class="chart-modal" id="chart-modal"></div>
+</div>
+
 <script>
 const SUPABASE_URL = 'https://etprvicvwxudexzkkkrf.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_vUJ4QnqmpJnuAN6qR0kmqg_85X_4FIg';
@@ -599,8 +706,22 @@ async function fetchOverview(ticker){
 }
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
+async function fetchDailySeries(ticker){
+  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(ticker)}&outputsize=full&apikey=${ALPHA_VANTAGE_KEY}`;
+  const res = await fetch(url);
+  const json = await res.json();
+  trackApiUse();
+  if (isRateLimited(json)) throw new Error('RATE_LIMIT');
+  const raw = json['Time Series (Daily)'];
+  if (!raw) throw new Error('NO_DATA');
+  const series = Object.keys(raw)
+    .sort() // ascending date order
+    .map(date => ({ date, close: parseFloat(raw[date]['4. close']) }));
+  return series;
+}
+
 const STORAGE_KEY = 'ledger-data';
-let state = { holdings: [], watchlist: [], lastRefresh: null, discoverPrices: {}, dailyUsage: { date: '', count: 0 } };
+let state = { holdings: [], watchlist: [], lastRefresh: null, discoverPrices: {}, dailyUsage: { date: '', count: 0 }, priceHistory: {} };
 let currentTab = 'portfolio';
 let uidCounter = 1;
 let discoverQuery = '';
@@ -668,7 +789,7 @@ async function loadState(){
     if (!res.ok) throw new Error('Supabase load error ' + res.status);
     const rows = await res.json();
     if (rows && rows.length && rows[0].data && Object.keys(rows[0].data).length){
-      state = Object.assign({holdings:[], watchlist:[], lastRefresh:null, discoverPrices:{}, dailyUsage:{date:'',count:0}}, rows[0].data);
+      state = Object.assign({holdings:[], watchlist:[], lastRefresh:null, discoverPrices:{}, dailyUsage:{date:'',count:0}, priceHistory:{}}, rows[0].data);
       return true;
     }
   }catch(e){
@@ -848,7 +969,7 @@ function holdingCard(h){
   <div class="card ${borderClass}">
     <div class="card-top">
       <div>
-        <div class="ticker">${h.ticker}</div>
+        <div class="ticker clickable" onclick="openChart('${h.ticker}','${(h.name || '').replace(/'/g, "\\'")}')">${h.ticker}</div>
         <div class="company-name">${h.name || ''}</div>
       </div>
       <button class="remove-btn" onclick="removeItem('holdings','${h.id}')" title="Remove">✕</button>
@@ -886,7 +1007,7 @@ function watchCard(w){
   <div class="card">
     <div class="card-top">
       <div>
-        <div class="ticker">${w.ticker}</div>
+        <div class="ticker clickable" onclick="openChart('${w.ticker}','${(w.name || '').replace(/'/g, "\\'")}')">${w.ticker}</div>
         <div class="company-name">${w.name || ''}</div>
       </div>
       <button class="remove-btn" onclick="removeItem('watchlist','${w.id}')" title="Remove">✕</button>
@@ -914,7 +1035,7 @@ function discoverCard(s){
   <div class="card">
     <div class="card-top">
       <div>
-        <div class="ticker">${s.ticker}</div>
+        <div class="ticker clickable" onclick="openChart('${s.ticker}','${(s.name || '').replace(/'/g, "\\'")}')">${s.ticker}</div>
         <div class="company-name">${s.name}</div>
         <div class="sector-tag">${s.sector}</div>
       </div>
@@ -1197,6 +1318,124 @@ async function getInsight(list, id){
     await saveState();
     render();
   }
+}
+
+// ===== Price history chart =====
+let chartState = { ticker: null, name: '', series: [], range: '3M' };
+const CHART_RANGES = { '1W': 7, '1M': 30, '3M': 90, '6M': 182, '1Y': 365, '5Y': 1825, 'All': Infinity };
+
+async function openChart(ticker, name){
+  chartState = { ticker, name: name || '', series: [], range: '3M' };
+  const overlay = document.getElementById('chart-overlay');
+  overlay.classList.add('open');
+  renderChartModal(true);
+
+  const cached = state.priceHistory[ticker];
+  const cacheIsFromToday = cached && cached.date === todayStr();
+  if (cacheIsFromToday){
+    chartState.series = cached.series;
+    renderChartModal(false);
+    return;
+  }
+  try{
+    const series = await fetchDailySeries(ticker);
+    state.priceHistory[ticker] = { series, date: todayStr() };
+    await saveState();
+    chartState.series = series;
+    renderChartModal(false);
+  }catch(err){
+    console.error(`Chart fetch failed for ${ticker}`, err);
+    if (cached){ // fall back to stale cached data rather than nothing
+      chartState.series = cached.series;
+      renderChartModal(false, err.message === 'RATE_LIMIT' ? "Showing older data — hit today's lookup limit." : null);
+    } else {
+      renderChartModal(false, err.message === 'RATE_LIMIT'
+        ? "Hit Alpha Vantage's daily limit — try again tomorrow."
+        : "Couldn't load price history for this stock.");
+    }
+  }
+}
+
+function closeChart(){
+  document.getElementById('chart-overlay').classList.remove('open');
+}
+
+function setChartRange(range){
+  chartState.range = range;
+  renderChartModal(false);
+}
+
+function renderChartModal(loading, errorMsg){
+  const modal = document.getElementById('chart-modal');
+  const { ticker, name, series, range } = chartState;
+  const rangeButtons = Object.keys(CHART_RANGES).map(r =>
+    `<button class="${r === range ? 'active' : ''}" onclick="setChartRange('${r}')">${r}</button>`
+  ).join('');
+
+  let body;
+  if (loading){
+    body = `<div class="chart-loading"><span class="spin"></span>Loading price history…</div>`;
+  } else if (errorMsg && !series.length){
+    body = `<div class="chart-error">${errorMsg}</div>`;
+  } else {
+    const days = CHART_RANGES[range];
+    const sliced = isFinite(days) ? series.slice(-days) : series;
+    body = `
+      ${errorMsg ? `<div class="chart-error" style="padding:6px 0 12px;">${errorMsg}</div>` : ''}
+      <div class="chart-svg-wrap">${buildChartSvg(sliced)}</div>
+      <div class="chart-meta">
+        <span>${sliced.length ? sliced[0].date : ''}</span>
+        <span>${sliced.length ? sliced[sliced.length - 1].date : ''}</span>
+      </div>`;
+  }
+
+  const latest = series.length ? series[series.length - 1].close : null;
+  const first = (() => {
+    const days = CHART_RANGES[range];
+    const sliced = isFinite(days) ? series.slice(-days) : series;
+    return sliced.length ? sliced[0].close : null;
+  })();
+  const periodChangePct = (latest !== null && first) ? ((latest - first) / first * 100) : null;
+  const dirClass = periodChangePct > 0 ? 'up' : (periodChangePct < 0 ? 'down' : '');
+
+  modal.innerHTML = `
+    <div class="chart-modal-head">
+      <div>
+        <div class="ct-ticker">${ticker}</div>
+        <div class="ct-name">${name || ''}</div>
+      </div>
+      <button class="ct-close" onclick="closeChart()">✕</button>
+    </div>
+    ${latest !== null ? `
+      <div class="chart-current-price">${fmtMoney(latest)}</div>
+      ${periodChangePct !== null ? `<div class="change ${dirClass}">${fmtPct(periodChangePct)} over ${range}</div>` : ''}
+    ` : ''}
+    <div class="chart-range-tabs">${rangeButtons}</div>
+    ${body}
+  `;
+}
+
+function buildChartSvg(series){
+  if (!series.length) return `<div class="chart-loading">No data for this range.</div>`;
+  const w = 580, h = 220, pad = 10;
+  const closes = series.map(p => p.close);
+  const min = Math.min(...closes);
+  const max = Math.max(...closes);
+  const range = (max - min) || 1;
+  const stepX = series.length > 1 ? (w - pad * 2) / (series.length - 1) : 0;
+  const points = series.map((p, i) => {
+    const x = pad + i * stepX;
+    const y = pad + (h - pad * 2) * (1 - (p.close - min) / range);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const isUp = closes[closes.length - 1] >= closes[0];
+  const lineColor = isUp ? 'var(--gain)' : 'var(--loss)';
+  const areaPoints = `${pad},${h - pad} ${points.join(' ')} ${w - pad},${h - pad}`;
+  return `
+    <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" xmlns="http://www.w3.org/2000/svg">
+      <polygon points="${areaPoints}" fill="${lineColor}" opacity="0.12"></polygon>
+      <polyline points="${points.join(' ')}" fill="none" stroke="${lineColor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>
+    </svg>`;
 }
 
 function todayStr(){
