@@ -563,6 +563,39 @@ main{
 }
 .ticker.clickable:hover{ text-decoration-color: var(--accent-gold); }
 
+.analyst-block{
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+}
+.analyst-block.analyst-empty{
+  color: var(--text-dim);
+  font-style: italic;
+}
+.analyst-verdict{
+  font-weight: 500;
+}
+.analyst-verdict .up{ color: var(--gain); font-weight: 600; }
+.analyst-verdict .down{ color: var(--loss); font-weight: 600; }
+.analyst-counts{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 3px;
+}
+.momentum-tag{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  display: inline-block;
+  margin-top: 8px;
+}
+.momentum-tag.up{ color: var(--gain); border-color: var(--gain); }
+.momentum-tag.down{ color: var(--loss); border-color: var(--loss); }
+
 .empty{
   text-align: center;
   padding: 60px 20px;
@@ -705,6 +738,57 @@ async function fetchOverview(ticker){
   };
 }
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+const FINNHUB_KEY = 'd9bd3qpr01qmk4glacagd9bd3qpr01qmk4glacb0';
+async function fetchAnalystTrend(ticker){
+  const res = await fetch(`https://finnhub.io/api/v1/stock/recommendation?symbol=${encodeURIComponent(ticker)}&token=${FINNHUB_KEY}`);
+  if (!res.ok) throw new Error('NO_DATA');
+  const json = await res.json();
+  if (!Array.isArray(json) || !json.length) throw new Error('NO_DATA');
+  const latest = json[0]; // most recent month
+  return {
+    strongBuy: latest.strongBuy || 0,
+    buy: latest.buy || 0,
+    hold: latest.hold || 0,
+    sell: latest.sell || 0,
+    strongSell: latest.strongSell || 0,
+    period: latest.period || '',
+    ts: Date.now()
+  };
+}
+function analystVerdict(trend){
+  if (!trend) return null;
+  const bullish = trend.strongBuy + trend.buy;
+  const bearish = trend.sell + trend.strongSell;
+  const total = bullish + trend.hold + bearish;
+  if (!total) return null;
+  if (bullish / total >= 0.6) return { label: 'Buy', cls: 'up' };
+  if (bearish / total >= 0.5) return { label: 'Sell', cls: 'down' };
+  return { label: 'Hold', cls: '' };
+}
+function analystTrendIsFresh(trend){
+  if (!trend || !trend.ts) return false;
+  return new Date(trend.ts).toDateString() === new Date().toDateString();
+}
+async function attachAnalystTrend(target, ticker){
+  if (analystTrendIsFresh(target.analystTrend)) return; // already have today's data
+  try{
+    target.analystTrend = await fetchAnalystTrend(ticker);
+  }catch(err){
+    console.error(`Analyst trend lookup failed for ${ticker}`, err);
+  }
+}
+function analystBlockHtml(trend){
+  if (!trend){
+    return `<div class="analyst-block analyst-empty">Analyst data not loaded yet</div>`;
+  }
+  const v = analystVerdict(trend);
+  return `
+    <div class="analyst-block">
+      <div class="analyst-verdict">Analyst consensus: <span class="${v ? v.cls : ''}">${v ? v.label : '—'}</span></div>
+      <div class="analyst-counts">${trend.strongBuy + trend.buy} Buy · ${trend.hold} Hold · ${trend.sell + trend.strongSell} Sell</div>
+    </div>`;
+}
 
 async function fetchDailySeries(ticker){
   const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(ticker)}&outputsize=full&apikey=${ALPHA_VANTAGE_KEY}`;
@@ -998,6 +1082,7 @@ function holdingCard(h){
     </div>
     <button class="btn insight-btn" onclick="getInsight('holdings','${h.id}')">${h.insightLoading ? '<span class="spin"></span>Looking up…' : 'View fundamentals'}</button>
     ${h.insight ? `<div class="insight-text">${h.insight.text}<span class="src">${h.insight.sources || ''}</span></div>` : ''}
+    ${analystBlockHtml(h.analystTrend)}
   </div>`;
 }
 
@@ -1018,6 +1103,7 @@ function watchCard(w){
     </div>
     <button class="btn insight-btn" onclick="getInsight('watchlist','${w.id}')">${w.insightLoading ? '<span class="spin"></span>Looking up…' : 'View fundamentals'}</button>
     ${w.insight ? `<div class="insight-text">${w.insight.text}<span class="src">${w.insight.sources || ''}</span></div>` : ''}
+    ${analystBlockHtml(w.analystTrend)}
     <button class="btn" style="margin-top:8px; width:100%;" onclick="moveToPortfolio('${w.id}')">Move to portfolio</button>
   </div>`;
 }
@@ -1041,6 +1127,7 @@ function discoverCard(s){
       </div>
     </div>
     ${priceRow}
+    ${analystBlockHtml(p ? p.analystTrend : null)}
     <div class="desc">${s.desc}</div>
     <div class="discover-card-foot">
       ${already
@@ -1221,10 +1308,15 @@ async function loadDiscoverPrices(){
   let rateLimited = false;
   try{
     for (const s of filtered){
-      if (state.discoverPrices[s.ticker]){ updated++; continue; } // already cached, skip a quota hit
+      if (state.discoverPrices[s.ticker]){
+        await attachAnalystTrend(state.discoverPrices[s.ticker], s.ticker);
+        updated++;
+        continue;
+      } // already cached, skip a quota hit
       try{
         const q2 = await fetchQuote(s.ticker);
         state.discoverPrices[s.ticker] = { price: q2.price, changePct: q2.changePct, ts: Date.now() };
+        await attachAnalystTrend(state.discoverPrices[s.ticker], s.ticker);
         updated++;
       }catch(err){
         if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
@@ -1267,6 +1359,7 @@ async function refreshPrices(){
         } else {
           unchanged++;
         }
+        await attachAnalystTrend(item, item.ticker);
       }catch(err){
         if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
         console.error(`Price lookup failed for ${item.ticker}`, err);
@@ -1397,6 +1490,7 @@ function renderChartModal(loading, errorMsg){
   })();
   const periodChangePct = (latest !== null && first) ? ((latest - first) / first * 100) : null;
   const dirClass = periodChangePct > 0 ? 'up' : (periodChangePct < 0 ? 'down' : '');
+  const momentum = computeMomentum(series);
 
   modal.innerHTML = `
     <div class="chart-modal-head">
@@ -1409,10 +1503,26 @@ function renderChartModal(loading, errorMsg){
     ${latest !== null ? `
       <div class="chart-current-price">${fmtMoney(latest)}</div>
       ${periodChangePct !== null ? `<div class="change ${dirClass}">${fmtPct(periodChangePct)} over ${range}</div>` : ''}
+      ${momentum ? `<div class="momentum-tag ${momentum.cls}">Short-term: ${momentum.label}</div>` : ''}
     ` : ''}
     <div class="chart-range-tabs">${rangeButtons}</div>
     ${body}
   `;
+}
+
+function computeMomentum(series){
+  if (!series || series.length < 20) return null;
+  const closes = series.map(p => p.close);
+  const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const last = closes[closes.length - 1];
+  const sma20 = avg(closes.slice(-20));
+  const sma50 = closes.length >= 50 ? avg(closes.slice(-50)) : null;
+  if (sma50 !== null){
+    if (last > sma20 && sma20 > sma50) return { label: 'Bullish (above 20 & 50-day averages)', cls: 'up' };
+    if (last < sma20 && sma20 < sma50) return { label: 'Bearish (below 20 & 50-day averages)', cls: 'down' };
+  }
+  if (last > sma20) return { label: 'Mildly bullish (above 20-day average)', cls: 'up' };
+  return { label: 'Mildly bearish (below 20-day average)', cls: 'down' };
 }
 
 function buildChartSvg(series){
@@ -1474,6 +1584,7 @@ async function autoFetchDiscover(limit){
       }
       entry.ts = Date.now(); // mark as checked today either way, so we don't re-check it again before other stocks
       state.discoverPrices[s.ticker] = entry;
+      await attachAnalystTrend(entry, s.ticker);
       fetched++;
       if (currentTab === 'discover') renderContentOnly();
     }catch(err){
