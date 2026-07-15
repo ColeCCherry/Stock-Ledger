@@ -460,6 +460,40 @@ main{
   .dividend-panel{ position: static; }
 }
 
+.info-section{
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.info-section-title{
+  font-family: 'IBM Plex Serif', serif;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.info-grid{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+}
+.info-grid > div{
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 4px;
+}
+.info-label{ color: var(--text-dim); }
+.info-val{ font-family: 'IBM Plex Mono', monospace; font-weight: 500; }
+.info-link{
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--accent-gold);
+  text-decoration: none;
+}
+.info-link:hover{ text-decoration: underline; }
+
 .chart-overlay{
   position: fixed;
   inset: 0;
@@ -805,7 +839,7 @@ async function fetchDailySeries(ticker){
 }
 
 const STORAGE_KEY = 'ledger-data';
-let state = { holdings: [], watchlist: [], lastRefresh: null, discoverPrices: {}, dailyUsage: { date: '', count: 0 }, priceHistory: {} };
+let state = { holdings: [], watchlist: [], lastRefresh: null, discoverPrices: {}, dailyUsage: { date: '', count: 0 }, priceHistory: {}, finnhubInfo: {} };
 let currentTab = 'portfolio';
 let uidCounter = 1;
 let discoverQuery = '';
@@ -873,7 +907,7 @@ async function loadState(){
     if (!res.ok) throw new Error('Supabase load error ' + res.status);
     const rows = await res.json();
     if (rows && rows.length && rows[0].data && Object.keys(rows[0].data).length){
-      state = Object.assign({holdings:[], watchlist:[], lastRefresh:null, discoverPrices:{}, dailyUsage:{date:'',count:0}, priceHistory:{}}, rows[0].data);
+      state = Object.assign({holdings:[], watchlist:[], lastRefresh:null, discoverPrices:{}, dailyUsage:{date:'',count:0}, priceHistory:{}, finnhubInfo:{}}, rows[0].data);
       return true;
     }
   }catch(e){
@@ -1413,40 +1447,89 @@ async function getInsight(list, id){
   }
 }
 
+async function fetchProfile(ticker){
+  const res = await fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${encodeURIComponent(ticker)}&token=${FINNHUB_KEY}`);
+  const json = await res.json();
+  if (!json || !json.name) throw new Error('NO_DATA');
+  return json;
+}
+async function fetchBasicFinancials(ticker){
+  const res = await fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${encodeURIComponent(ticker)}&metric=all&token=${FINNHUB_KEY}`);
+  const json = await res.json();
+  if (!json || !json.metric) throw new Error('NO_DATA');
+  return json.metric;
+}
+function pickMetric(metric, keys){
+  for (const k of keys){
+    if (metric && metric[k] !== undefined && metric[k] !== null) return metric[k];
+  }
+  return null;
+}
+function fmtMarketCap(millions){
+  if (millions === null || millions === undefined) return '—';
+  const usd = millions * 1e6;
+  if (usd >= 1e12) return '$' + (usd / 1e12).toFixed(2) + 'T';
+  if (usd >= 1e9) return '$' + (usd / 1e9).toFixed(2) + 'B';
+  if (usd >= 1e6) return '$' + (usd / 1e6).toFixed(2) + 'M';
+  return fmtMoney(usd);
+}
+
 // ===== Price history chart =====
-let chartState = { ticker: null, name: '', series: [], range: '3M' };
+let chartState = { ticker: null, name: '', series: [], range: '3M', info: null };
 const CHART_RANGES = { '1W': 7, '1M': 30, '3M': 90, '6M': 182, '1Y': 365, '5Y': 1825, 'All': Infinity };
 
 async function openChart(ticker, name){
-  chartState = { ticker, name: name || '', series: [], range: '3M' };
+  chartState = { ticker, name: name || '', series: [], range: '3M', info: null };
   const overlay = document.getElementById('chart-overlay');
   overlay.classList.add('open');
   renderChartModal(true);
 
-  const cached = state.priceHistory[ticker];
-  const cacheIsFromToday = cached && cached.date === todayStr();
-  if (cacheIsFromToday){
-    chartState.series = cached.series;
-    renderChartModal(false);
-    return;
+  const cachedSeries = state.priceHistory[ticker];
+  const seriesIsFresh = cachedSeries && cachedSeries.date === todayStr();
+  const cachedInfo = state.finnhubInfo[ticker];
+  const infoIsFresh = cachedInfo && cachedInfo.date === todayStr();
+
+  if (seriesIsFresh) chartState.series = cachedSeries.series;
+  if (infoIsFresh) chartState.info = cachedInfo;
+  if (seriesIsFresh && infoIsFresh){ renderChartModal(false); return; }
+
+  const jobs = [];
+  jobs.push(seriesIsFresh
+    ? Promise.resolve({ status: 'fulfilled', value: cachedSeries.series })
+    : fetchDailySeries(ticker).then(v => ({ status: 'fulfilled', value: v })).catch(e => ({ status: 'rejected', reason: e })));
+  jobs.push(infoIsFresh
+    ? Promise.resolve({ status: 'fulfilled', value: cachedInfo })
+    : Promise.allSettled([fetchProfile(ticker), fetchBasicFinancials(ticker), fetchAnalystTrend(ticker)])
+        .then(([p, m, t]) => ({
+          status: 'fulfilled',
+          value: {
+            profile: p.status === 'fulfilled' ? p.value : null,
+            metrics: m.status === 'fulfilled' ? m.value : null,
+            analystTrend: t.status === 'fulfilled' ? t.value : null,
+            date: todayStr()
+          }
+        })));
+
+  const [seriesResult, infoResult] = await Promise.all(jobs);
+
+  let seriesErr = null;
+  if (seriesResult.status === 'fulfilled'){
+    chartState.series = seriesResult.value;
+    state.priceHistory[ticker] = { series: seriesResult.value, date: todayStr() };
+  } else {
+    seriesErr = seriesResult.reason && seriesResult.reason.message === 'RATE_LIMIT'
+      ? "Price history: hit Alpha Vantage's daily limit — try again tomorrow."
+      : "Couldn't load price history for this stock.";
+    if (cachedSeries){ chartState.series = cachedSeries.series; seriesErr = "Showing older price history — hit today's lookup limit."; }
   }
-  try{
-    const series = await fetchDailySeries(ticker);
-    state.priceHistory[ticker] = { series, date: todayStr() };
-    await saveState();
-    chartState.series = series;
-    renderChartModal(false);
-  }catch(err){
-    console.error(`Chart fetch failed for ${ticker}`, err);
-    if (cached){ // fall back to stale cached data rather than nothing
-      chartState.series = cached.series;
-      renderChartModal(false, err.message === 'RATE_LIMIT' ? "Showing older data — hit today's lookup limit." : null);
-    } else {
-      renderChartModal(false, err.message === 'RATE_LIMIT'
-        ? "Hit Alpha Vantage's daily limit — try again tomorrow."
-        : "Couldn't load price history for this stock.");
-    }
+
+  if (infoResult.status === 'fulfilled'){
+    chartState.info = infoResult.value;
+    state.finnhubInfo[ticker] = infoResult.value;
   }
+
+  await saveState();
+  renderChartModal(false, seriesErr);
 }
 
 function closeChart(){
@@ -1456,6 +1539,58 @@ function closeChart(){
 function setChartRange(range){
   chartState.range = range;
   renderChartModal(false);
+}
+
+function renderCompanyInfoHtml(info){
+  if (!info || (!info.profile && !info.metrics && !info.analystTrend)){
+    return `<div class="analyst-block analyst-empty">Company data not loaded yet.</div>`;
+  }
+  const p = info.profile;
+  const m = info.metrics || {};
+
+  const profileHtml = p ? `
+    <div class="info-section">
+      <div class="info-section-title">About</div>
+      <div class="info-grid">
+        <div><span class="info-label">Exchange</span><span class="info-val">${p.exchange || '—'}</span></div>
+        <div><span class="info-label">Industry</span><span class="info-val">${p.finnhubIndustry || '—'}</span></div>
+        <div><span class="info-label">Market cap</span><span class="info-val">${fmtMarketCap(p.marketCapitalization)}</span></div>
+        <div><span class="info-label">IPO date</span><span class="info-val">${p.ipo || '—'}</span></div>
+      </div>
+      ${p.weburl ? `<a href="${p.weburl}" target="_blank" rel="noopener" class="info-link">${p.weburl.replace(/^https?:\/\//, '')}</a>` : ''}
+    </div>` : '';
+
+  const peVal = pickMetric(m, ['peTTM', 'peBasicExclExtraTTM', 'peExclExtraTTM', 'peNormalizedAnnual']);
+  const epsVal = pickMetric(m, ['epsTTM', 'epsInclExtraItemsTTM', 'epsBasicExclExtraItemsTTM']);
+  const betaVal = pickMetric(m, ['beta']);
+  const divYieldVal = pickMetric(m, ['dividendYieldIndicatedAnnual', 'currentDividendYieldTTM']);
+  const roeVal = pickMetric(m, ['roeTTM', 'roeRfy']);
+  const grossMarginVal = pickMetric(m, ['grossMarginTTM', 'grossMarginAnnual']);
+  const wk52High = pickMetric(m, ['52WeekHigh']);
+  const wk52Low = pickMetric(m, ['52WeekLow']);
+
+  const metricsHtml = Object.keys(m).length ? `
+    <div class="info-section">
+      <div class="info-section-title">Key metrics</div>
+      <div class="info-grid">
+        <div><span class="info-label">P/E (TTM)</span><span class="info-val">${peVal !== null ? peVal.toFixed(2) : '—'}</span></div>
+        <div><span class="info-label">EPS (TTM)</span><span class="info-val">${epsVal !== null ? '$' + epsVal.toFixed(2) : '—'}</span></div>
+        <div><span class="info-label">Beta</span><span class="info-val">${betaVal !== null ? betaVal.toFixed(2) : '—'}</span></div>
+        <div><span class="info-label">Div. yield</span><span class="info-val">${divYieldVal !== null ? divYieldVal.toFixed(2) + '%' : '—'}</span></div>
+        <div><span class="info-label">ROE (TTM)</span><span class="info-val">${roeVal !== null ? roeVal.toFixed(2) + '%' : '—'}</span></div>
+        <div><span class="info-label">Gross margin</span><span class="info-val">${grossMarginVal !== null ? grossMarginVal.toFixed(2) + '%' : '—'}</span></div>
+        <div><span class="info-label">52W high</span><span class="info-val">${wk52High !== null ? fmtMoney(wk52High) : '—'}</span></div>
+        <div><span class="info-label">52W low</span><span class="info-val">${wk52Low !== null ? fmtMoney(wk52Low) : '—'}</span></div>
+      </div>
+    </div>` : '';
+
+  const trendHtml = info.analystTrend ? `
+    <div class="info-section">
+      <div class="info-section-title">Analyst recommendations ${info.analystTrend.period ? `(as of ${info.analystTrend.period})` : ''}</div>
+      ${analystBlockHtml(info.analystTrend)}
+    </div>` : `<div class="info-section"><div class="info-section-title">Analyst recommendations</div><div class="analyst-block analyst-empty">Not available for this ticker.</div></div>`;
+
+  return profileHtml + metricsHtml + trendHtml;
 }
 
 function renderChartModal(loading, errorMsg){
@@ -1507,6 +1642,7 @@ function renderChartModal(loading, errorMsg){
     ` : ''}
     <div class="chart-range-tabs">${rangeButtons}</div>
     ${body}
+    ${renderCompanyInfoHtml(chartState.info)}
   `;
 }
 
