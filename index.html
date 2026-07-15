@@ -525,6 +525,7 @@ main{
     <button class="tab-btn" id="tab-discover" onclick="setTab('discover')">Discover</button>
   </div>
   <div class="spacer"></div>
+  <span id="usage-badge" style="font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-dim); margin-right:4px;"></span>
   <button class="btn primary" id="refresh-btn" onclick="refreshPrices()">Refresh prices</button>
 </div>
 
@@ -547,9 +548,27 @@ function avUrl(fn, symbol){
 function isRateLimited(json){
   return !!(json && (json['Note'] || json['Information']));
 }
+function trackApiUse(){
+  const today = new Date().toISOString().slice(0, 10);
+  if (!state.dailyUsage || state.dailyUsage.date !== today){
+    state.dailyUsage = { date: today, count: 0 };
+  }
+  state.dailyUsage.count++;
+  updateUsageBadge();
+}
+function updateUsageBadge(){
+  const el = document.getElementById('usage-badge');
+  if (!el) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const used = (state.dailyUsage && state.dailyUsage.date === today) ? state.dailyUsage.count : 0;
+  const remaining = Math.max(0, 25 - used);
+  el.textContent = `${remaining} of 25 lookups left today`;
+  el.style.color = remaining <= 5 ? 'var(--loss)' : 'var(--text-dim)';
+}
 async function fetchQuote(ticker){
   const res = await fetch(avUrl('GLOBAL_QUOTE', ticker));
   const json = await res.json();
+  trackApiUse();
   if (isRateLimited(json)) throw new Error('RATE_LIMIT');
   const q = json['Global Quote'];
   if (!q || !q['05. price']) throw new Error('NO_DATA');
@@ -561,6 +580,7 @@ async function fetchQuote(ticker){
 async function fetchOverview(ticker){
   const res = await fetch(avUrl('OVERVIEW', ticker));
   const json = await res.json();
+  trackApiUse();
   if (isRateLimited(json)) throw new Error('RATE_LIMIT');
   if (!json || !json.Symbol) throw new Error('NO_DATA');
   const divYield = parseFloat(json.DividendYield);
@@ -580,7 +600,7 @@ async function fetchOverview(ticker){
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
 const STORAGE_KEY = 'ledger-data';
-let state = { holdings: [], watchlist: [], lastRefresh: null, discoverPrices: {} };
+let state = { holdings: [], watchlist: [], lastRefresh: null, discoverPrices: {}, dailyUsage: { date: '', count: 0 } };
 let currentTab = 'portfolio';
 let uidCounter = 1;
 let discoverQuery = '';
@@ -648,7 +668,7 @@ async function loadState(){
     if (!res.ok) throw new Error('Supabase load error ' + res.status);
     const rows = await res.json();
     if (rows && rows.length && rows[0].data && Object.keys(rows[0].data).length){
-      state = Object.assign({holdings:[], watchlist:[], lastRefresh:null, discoverPrices:{}}, rows[0].data);
+      state = Object.assign({holdings:[], watchlist:[], lastRefresh:null, discoverPrices:{}, dailyUsage:{date:'',count:0}}, rows[0].data);
       return true;
     }
   }catch(e){
@@ -1273,6 +1293,7 @@ async function dailyAutoRun(){
   const had = await loadState();
   if (!had) { seedDefaults(); await saveState(); }
   render();
+  updateUsageBadge();
   if (state.lastAutoRunDate !== todayStr()){
     dailyAutoRun(); // fire and forget — runs in the background, doesn't block the UI
   }
