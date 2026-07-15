@@ -494,6 +494,33 @@ main{
 }
 .info-link:hover{ text-decoration: underline; }
 
+.news-list{
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.news-item{
+  display: block;
+  padding: 8px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  text-decoration: none;
+  transition: border-color 0.15s;
+}
+.news-item:hover{ border-color: var(--accent-gold); }
+.news-headline{
+  font-size: 12.5px;
+  color: var(--text);
+  line-height: 1.4;
+}
+.news-meta{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10.5px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
 .chart-overlay{
   position: fixed;
   inset: 0;
@@ -1114,8 +1141,7 @@ function holdingCard(h){
       <span>Gain / loss</span>
       <span class="val ${gain >= 0 ? 'up' : 'down'}">${fmtMoney(gain)} (${fmtPct(gainPct)})</span>
     </div>
-    <button class="btn insight-btn" onclick="getInsight('holdings','${h.id}')">${h.insightLoading ? '<span class="spin"></span>Looking up…' : 'View fundamentals'}</button>
-    ${h.insight ? `<div class="insight-text">${h.insight.text}<span class="src">${h.insight.sources || ''}</span></div>` : ''}
+    <button class="btn insight-btn" onclick="openChart('${h.ticker}','${(h.name || '').replace(/'/g, "\\'")}')">🔍 Deep dive</button>
     ${analystBlockHtml(h.analystTrend)}
   </div>`;
 }
@@ -1135,8 +1161,7 @@ function watchCard(w){
       <span class="price">${fmtMoney(w.currentPrice)}</span>
       <span class="change ${dayDir}">${fmtPct(w.changePct)} today</span>
     </div>
-    <button class="btn insight-btn" onclick="getInsight('watchlist','${w.id}')">${w.insightLoading ? '<span class="spin"></span>Looking up…' : 'View fundamentals'}</button>
-    ${w.insight ? `<div class="insight-text">${w.insight.text}<span class="src">${w.insight.sources || ''}</span></div>` : ''}
+    <button class="btn insight-btn" onclick="openChart('${w.ticker}','${(w.name || '').replace(/'/g, "\\'")}')">🔍 Deep dive</button>
     ${analystBlockHtml(w.analystTrend)}
     <button class="btn" style="margin-top:8px; width:100%;" onclick="moveToPortfolio('${w.id}')">Move to portfolio</button>
   </div>`;
@@ -1162,6 +1187,7 @@ function discoverCard(s){
     </div>
     ${priceRow}
     ${analystBlockHtml(p ? p.analystTrend : null)}
+    <button class="btn insight-btn" style="width:100%; margin-top:8px;" onclick="openChart('${s.ticker}','${(s.name || '').replace(/'/g, "\\'")}')">🔍 Deep dive</button>
     <div class="desc">${s.desc}</div>
     <div class="discover-card-foot">
       ${already
@@ -1453,6 +1479,33 @@ async function fetchProfile(ticker){
   if (!json || !json.name) throw new Error('NO_DATA');
   return json;
 }
+function escapeHtml(str){
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+async function fetchCompanyNews(ticker){
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 7);
+  const fmt = d => d.toISOString().slice(0, 10);
+  const res = await fetch(`https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${fmt(from)}&to=${fmt(to)}&token=${FINNHUB_KEY}`);
+  const json = await res.json();
+  if (!Array.isArray(json)) throw new Error('NO_DATA');
+  return json
+    .sort((a, b) => b.datetime - a.datetime)
+    .slice(0, 6)
+    .map(n => ({ headline: n.headline, source: n.source, url: n.url, datetime: n.datetime }));
+}
+function timeAgo(unixSeconds){
+  const diffMs = Date.now() - unixSeconds * 1000;
+  const hours = Math.floor(diffMs / 3600000);
+  if (hours < 1) return 'Just now';
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 async function fetchBasicFinancials(ticker){
   const res = await fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${encodeURIComponent(ticker)}&metric=all&token=${FINNHUB_KEY}`);
   const json = await res.json();
@@ -1499,13 +1552,14 @@ async function openChart(ticker, name){
     : fetchDailySeries(ticker).then(v => ({ status: 'fulfilled', value: v })).catch(e => ({ status: 'rejected', reason: e })));
   jobs.push(infoIsFresh
     ? Promise.resolve({ status: 'fulfilled', value: cachedInfo })
-    : Promise.allSettled([fetchProfile(ticker), fetchBasicFinancials(ticker), fetchAnalystTrend(ticker)])
-        .then(([p, m, t]) => ({
+    : Promise.allSettled([fetchProfile(ticker), fetchBasicFinancials(ticker), fetchAnalystTrend(ticker), fetchCompanyNews(ticker)])
+        .then(([p, m, t, n]) => ({
           status: 'fulfilled',
           value: {
             profile: p.status === 'fulfilled' ? p.value : null,
             metrics: m.status === 'fulfilled' ? m.value : null,
             analystTrend: t.status === 'fulfilled' ? t.value : null,
+            news: n.status === 'fulfilled' ? n.value : [],
             date: todayStr()
           }
         })));
@@ -1590,7 +1644,21 @@ function renderCompanyInfoHtml(info){
       ${analystBlockHtml(info.analystTrend)}
     </div>` : `<div class="info-section"><div class="info-section-title">Analyst recommendations</div><div class="analyst-block analyst-empty">Not available for this ticker.</div></div>`;
 
-  return profileHtml + metricsHtml + trendHtml;
+  const newsItems = info.news || [];
+  const newsHtml = `
+    <div class="info-section">
+      <div class="info-section-title">Recent news</div>
+      ${newsItems.length ? `
+        <div class="news-list">
+          ${newsItems.map(n => `
+            <a class="news-item" href="${n.url}" target="_blank" rel="noopener">
+              <div class="news-headline">${escapeHtml(n.headline)}</div>
+              <div class="news-meta">${escapeHtml(n.source)} · ${timeAgo(n.datetime)}</div>
+            </a>`).join('')}
+        </div>` : `<div class="analyst-block analyst-empty">No recent news found for this ticker.</div>`}
+    </div>`;
+
+  return profileHtml + metricsHtml + trendHtml + newsHtml;
 }
 
 function renderChartModal(loading, errorMsg){
