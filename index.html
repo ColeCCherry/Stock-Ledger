@@ -1200,7 +1200,8 @@ async function getInsight(list, id){
 }
 
 function todayStr(){
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 // A price move under this % is treated as noise — display and storage are left untouched to avoid wasted writes.
@@ -1245,47 +1246,60 @@ async function autoFetchDiscover(limit){
   return { fetched, rateLimited };
 }
 
+let dailyAutoRunInFlight = false;
+
 async function dailyAutoRun(){
+  if (dailyAutoRunInFlight) return; // already running in this tab
   if (state.lastAutoRunDate === todayStr()) return; // already ran today
-  const portfolioItems = [...state.holdings, ...state.watchlist];
-  let checked = 0;
-  let changed = 0;
-  let rateLimited = false;
+  dailyAutoRunInFlight = true;
 
-  // 1. Your own stocks first — always take priority for the daily quota.
-  for (const item of portfolioItems){
-    try{
-      const q = await fetchQuote(item.ticker);
-      checked++;
-      if (isMeaningfulChange(item.currentPrice, q.price)){
-        item.currentPrice = q.price;
-        item.changePct = q.changePct;
-        changed++;
-      }
-    }catch(err){
-      if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
-      console.error(`Daily check failed for ${item.ticker}`, err);
-    }
-    await sleep(900);
-  }
-  if (changed > 0) render();
-
-  // 2. Whatever's left of the daily budget goes to Discover.
-  let discoverResult = { fetched: 0, rateLimited: false };
-  if (!rateLimited){
-    const remaining = Math.max(0, 25 - checked);
-    discoverResult = await autoFetchDiscover(remaining);
-  }
-
+  // Mark today as "claimed" and save immediately — before any fetching — so a page
+  // reload mid-run can't start a second overlapping run and clobber your data.
   state.lastAutoRunDate = todayStr();
   await saveState();
 
-  const bits = [];
-  if (portfolioItems.length) bits.push(`checked your ${portfolioItems.length} stock${portfolioItems.length === 1 ? '' : 's'} (${changed} moved)`);
-  if (discoverResult.fetched) bits.push(`loaded ${discoverResult.fetched} new Discover price${discoverResult.fetched === 1 ? '' : 's'}`);
-  if (bits.length) showToast('Today: ' + bits.join(', ') + '.', 4000);
-  if (rateLimited || discoverResult.rateLimited){
-    showToast("Hit Alpha Vantage's daily limit — picks up where it left off tomorrow.", 4000);
+  try{
+    const portfolioItems = [...state.holdings, ...state.watchlist];
+    let checked = 0;
+    let changed = 0;
+    let rateLimited = false;
+
+    // 1. Your own stocks first — always take priority for the daily quota.
+    for (const item of portfolioItems){
+      try{
+        const q = await fetchQuote(item.ticker);
+        checked++;
+        if (isMeaningfulChange(item.currentPrice, q.price)){
+          item.currentPrice = q.price;
+          item.changePct = q.changePct;
+          changed++;
+        }
+      }catch(err){
+        if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
+        console.error(`Daily check failed for ${item.ticker}`, err);
+      }
+      await sleep(900);
+    }
+    if (changed > 0) render();
+
+    // 2. Whatever's left of the daily budget goes to Discover.
+    let discoverResult = { fetched: 0, rateLimited: false };
+    if (!rateLimited){
+      const remaining = Math.max(0, 25 - checked);
+      discoverResult = await autoFetchDiscover(remaining);
+    }
+
+    await saveState(); // persist the actual price/dividend updates from this run
+
+    const bits = [];
+    if (portfolioItems.length) bits.push(`checked your ${portfolioItems.length} stock${portfolioItems.length === 1 ? '' : 's'} (${changed} moved)`);
+    if (discoverResult.fetched) bits.push(`loaded ${discoverResult.fetched} new Discover price${discoverResult.fetched === 1 ? '' : 's'}`);
+    if (bits.length) showToast('Today: ' + bits.join(', ') + '.', 4000);
+    if (rateLimited || discoverResult.rateLimited){
+      showToast("Hit Alpha Vantage's daily limit — picks up where it left off tomorrow.", 4000);
+    }
+  } finally {
+    dailyAutoRunInFlight = false;
   }
 }
 
