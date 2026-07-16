@@ -1382,11 +1382,22 @@ async function addItem(list){
     item.costBasis = cost;
     item.purchaseDate = date;
   }
+  const cachedFromDiscover = state.discoverPrices[ticker];
+  if (cachedFromDiscover){
+    item.currentPrice = cachedFromDiscover.price;
+    item.changePct = cachedFromDiscover.changePct;
+    item.analystTrend = cachedFromDiscover.analystTrend || null;
+  }
   state[list].push(item);
   saveState();
   render();
-  showToast(`Added ${ticker}. Fetching its price…`);
 
+  if (cachedFromDiscover){
+    showToast(`Added ${ticker} — used today's cached price, no lookup spent.`);
+    return;
+  }
+
+  showToast(`Added ${ticker}. Fetching its price…`);
   try{
     const q = await fetchQuote(ticker);
     item.currentPrice = q.price;
