@@ -1227,13 +1227,35 @@ function renderContentOnly(){
   document.getElementById('content').innerHTML = renderDiscover();
 }
 
-function addFromDiscover(ticker){
+async function addFromDiscover(ticker){
   const s = DISCOVER_STOCKS.find(x => x.ticker === ticker);
   if (!s) return;
-  state.watchlist.push({ id: uid(), ticker: s.ticker, name: s.name, currentPrice: null, changePct: null, insight: null });
+  const cached = state.discoverPrices[ticker];
+  const item = {
+    id: uid(), ticker: s.ticker, name: s.name,
+    currentPrice: cached ? cached.price : null,
+    changePct: cached ? cached.changePct : null,
+    analystTrend: cached ? cached.analystTrend : null,
+    insight: null
+  };
+  state.watchlist.push(item);
   saveState();
   renderContentOnly();
   showToast(`Added ${ticker} to your watchlist.`);
+
+  if (!cached){
+    try{
+      const q = await fetchQuote(ticker);
+      item.currentPrice = q.price;
+      item.changePct = q.changePct;
+      await attachAnalystTrend(item, ticker);
+      await saveState();
+      render();
+    }catch(err){
+      console.error(`Price lookup failed for ${ticker}`, err);
+      if (err.message === 'RATE_LIMIT') showToast("Hit Alpha Vantage's daily limit — price will fill in on next refresh.");
+    }
+  }
 }
 
 async function addOwnedFromDiscover(ticker){
@@ -1244,15 +1266,31 @@ async function addOwnedFromDiscover(ticker){
   const shares = parseFloat(sharesStr) || 1;
   const costStr = prompt(`What price did you pay per share for ${ticker}? (Leave blank to fill in later)`, '');
   const cost = parseFloat(costStr) || 0;
-  state.holdings.push({
+  const cached = state.discoverPrices[ticker];
+  const item = {
     id: uid(), ticker: s.ticker, name: s.name, shares, costBasis: cost,
-    currentPrice: state.discoverPrices[s.ticker] ? state.discoverPrices[s.ticker].price : cost,
-    changePct: state.discoverPrices[s.ticker] ? state.discoverPrices[s.ticker].changePct : 0,
+    currentPrice: cached ? cached.price : cost,
+    changePct: cached ? cached.changePct : 0,
+    analystTrend: cached ? cached.analystTrend : null,
     purchaseDate: '', insight: null
-  });
+  };
+  state.holdings.push(item);
   await saveState();
   renderContentOnly();
   showToast(`Added ${ticker} to your portfolio.`);
+
+  if (!cached){
+    try{
+      const q = await fetchQuote(ticker);
+      item.currentPrice = q.price;
+      item.changePct = q.changePct;
+      await attachAnalystTrend(item, ticker);
+      await saveState();
+      render();
+    }catch(err){
+      console.error(`Price lookup failed for ${ticker}`, err);
+    }
+  }
 }
 
 function addCardHtml(list){
@@ -1347,7 +1385,22 @@ async function addItem(list){
   state[list].push(item);
   saveState();
   render();
-  showToast(`Added ${ticker}. Hit Refresh to pull its price.`);
+  showToast(`Added ${ticker}. Fetching its price…`);
+
+  try{
+    const q = await fetchQuote(ticker);
+    item.currentPrice = q.price;
+    item.changePct = q.changePct;
+    await attachAnalystTrend(item, ticker);
+    await saveState();
+    render();
+    showToast(`${ticker} added — price loaded.`);
+  }catch(err){
+    console.error(`Price lookup failed for ${ticker}`, err);
+    showToast(err.message === 'RATE_LIMIT'
+      ? "Hit Alpha Vantage's daily limit — price will fill in on next refresh."
+      : `Couldn't fetch a price for ${ticker} yet — try Refresh prices.`);
+  }
 }
 
 
