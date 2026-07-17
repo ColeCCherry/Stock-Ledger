@@ -903,7 +903,101 @@ const DISCOVER_STOCKS = [
   { ticker: 'ORCL', name: 'Oracle Corp.', sector: 'Technology', desc: 'Sells database software and increasingly cloud infrastructure and applications used by large enterprises.' },
   { ticker: 'TRV', name: 'Travelers Companies Inc.', sector: 'Financials', desc: 'Sells property and casualty insurance to individuals and businesses, covering things like auto, home, and business liability.' },
   { ticker: 'PGR', name: 'Progressive Corp.', sector: 'Financials', desc: 'Sells auto, home, and other insurance directly to consumers and through independent agents, known for usage-based pricing.' },
-  { ticker: 'ALL', name: 'Allstate Corp.', sector: 'Financials', desc: 'Offers auto, home, and life insurance products, one of the largest personal-lines insurers in the US.' }
+  { ticker: 'ALL', name: 'Allstate Corp.', sector: 'Financials', desc: 'Offers auto, home, and life insurance products, one of the largest personal-lines insurers in the US.' },
+
+  // Technology
+  { ticker: 'INTC', name: 'Intel Corp.', sector: 'Technology', desc: 'Designs and manufactures computer processors, competing in PCs, servers, and increasingly AI chips.' },
+  { ticker: 'IBM', name: 'International Business Machines Corp.', sector: 'Technology', desc: 'Provides enterprise software, consulting, and hybrid cloud services, with a growing focus on AI for businesses.' },
+  { ticker: 'ADBE', name: 'Adobe Inc.', sector: 'Technology', desc: 'Makes creative and document software like Photoshop and Acrobat, sold mainly through subscriptions.' },
+  { ticker: 'CSCO', name: 'Cisco Systems Inc.', sector: 'Technology', desc: 'Builds networking hardware and software that businesses use to run the internet and internal networks.' },
+  { ticker: 'QCOM', name: 'Qualcomm Inc.', sector: 'Technology', desc: 'Designs chips for smartphones and licenses wireless technology patents used across the mobile industry.' },
+  { ticker: 'TXN', name: 'Texas Instruments Inc.', sector: 'Technology', desc: 'Makes analog and embedded chips used in everything from cars to industrial equipment to phones.' },
+  { ticker: 'NOW', name: 'ServiceNow Inc.', sector: 'Technology', desc: 'Sells cloud software that helps large companies automate internal workflows like IT and HR requests.' },
+  { ticker: 'INTU', name: 'Intuit Inc.', sector: 'Technology', desc: 'Makes TurboTax, QuickBooks, and Credit Karma, serving individuals and small businesses with financial software.' },
+  { ticker: 'SHOP', name: 'Shopify Inc.', sector: 'Technology', desc: 'Provides the software platform that lets merchants build and run their own online stores.' },
+  { ticker: 'PYPL', name: 'PayPal Holdings Inc.', sector: 'Technology', desc: 'Operates an online payments platform, including Venmo, used by consumers and merchants worldwide.' },
+  { ticker: 'UBER', name: 'Uber Technologies Inc.', sector: 'Technology', desc: 'Runs the ride-hailing and food-delivery platform connecting riders and diners with drivers and couriers.' },
+  { ticker: 'ABNB', name: 'Airbnb Inc.', sector: 'Technology', desc: 'Operates the online marketplace where hosts list homes and experiences for travelers to book.' },
+  { ticker: 'SPOT', name: 'Spotify Technology S.A.', sector: 'Technology', desc: 'Runs the audio streaming service offering music and podcasts through free and paid subscription tiers.' },
+  { ticker: 'SQ', name: 'Block Inc.', sector: 'Technology', desc: 'Owns Square (payment tools for merchants) and Cash App (consumer payments), plus a stake in Bitcoin-related ventures.' },
+  { ticker: 'PLTR', name: 'Palantir Technologies Inc.', sector: 'Technology', desc: 'Builds data analytics software used by government agencies and large companies to manage complex information.' },
+
+  // Healthcare
+  { ticker: 'MRK', name: 'Merck & Co. Inc.', sector: 'Healthcare', desc: 'A pharmaceutical company known for cancer treatments, vaccines, and animal health products.' },
+  { ticker: 'ABBV', name: 'AbbVie Inc.', sector: 'Healthcare', desc: 'Develops treatments for immunology, oncology, and neuroscience, including the drug Humira.' },
+  { ticker: 'LLY', name: 'Eli Lilly and Co.', sector: 'Healthcare', desc: 'A pharmaceutical maker known for diabetes and weight-loss drugs alongside a broad treatment portfolio.' },
+  { ticker: 'BMY', name: 'Bristol-Myers Squibb Co.', sector: 'Healthcare', desc: 'Develops medicines for cancer, heart disease, and immunological conditions.' },
+  { ticker: 'GILD', name: 'Gilead Sciences Inc.', sector: 'Healthcare', desc: 'Focuses on antiviral treatments, particularly for HIV, along with oncology and liver disease drugs.' },
+  { ticker: 'AMGN', name: 'Amgen Inc.', sector: 'Healthcare', desc: 'A biotechnology company developing treatments for cancer, bone disease, and inflammatory conditions.' },
+  { ticker: 'CVS', name: 'CVS Health Corp.', sector: 'Healthcare', desc: 'Operates pharmacies, a health insurer (Aetna), and pharmacy benefit management services.' },
+  { ticker: 'ISRG', name: 'Intuitive Surgical Inc.', sector: 'Healthcare', desc: 'Makes the da Vinci robotic surgical systems used by hospitals for minimally invasive procedures.' },
+  { ticker: 'MDT', name: 'Medtronic plc', sector: 'Healthcare', desc: 'Manufactures medical devices including pacemakers, insulin pumps, and surgical equipment.' },
+
+  // Financials
+  { ticker: 'BAC', name: 'Bank of America Corp.', sector: 'Financials', desc: 'One of the largest US banks, offering consumer banking, wealth management, and investment banking.' },
+  { ticker: 'WFC', name: 'Wells Fargo & Co.', sector: 'Financials', desc: 'A major US bank providing consumer banking, mortgages, and commercial lending services.' },
+  { ticker: 'GS', name: 'Goldman Sachs Group Inc.', sector: 'Financials', desc: 'A leading investment bank offering trading, advisory, and asset management services to institutions.' },
+  { ticker: 'MS', name: 'Morgan Stanley', sector: 'Financials', desc: 'Provides investment banking, wealth management, and institutional securities services.' },
+  { ticker: 'SCHW', name: 'Charles Schwab Corp.', sector: 'Financials', desc: 'A brokerage and bank offering investing, trading, and wealth management to individual investors.' },
+  { ticker: 'AXP', name: 'American Express Co.', sector: 'Financials', desc: 'Issues charge and credit cards and operates its own payment network, geared toward premium customers.' },
+  { ticker: 'BLK', name: 'BlackRock Inc.', sector: 'Financials', desc: 'The world\'s largest asset manager, running index funds and ETFs including the iShares lineup.' },
+
+  // Consumer
+  { ticker: 'SBUX', name: 'Starbucks Corp.', sector: 'Consumer', desc: 'Operates the global coffeehouse chain, selling beverages and food in company-owned and licensed stores.' },
+  { ticker: 'TGT', name: 'Target Corp.', sector: 'Consumer Staples', desc: 'Operates general merchandise retail stores selling groceries, apparel, and home goods.' },
+  { ticker: 'HD', name: 'Home Depot Inc.', sector: 'Consumer', desc: 'The largest home improvement retailer, selling building materials and tools to homeowners and contractors.' },
+  { ticker: 'LOW', name: "Lowe's Companies Inc.", sector: 'Consumer', desc: 'Operates home improvement stores selling hardware, appliances, and building supplies.' },
+  { ticker: 'CMG', name: 'Chipotle Mexican Grill Inc.', sector: 'Consumer', desc: 'Operates a fast-casual restaurant chain serving customizable Mexican-inspired food.' },
+  { ticker: 'LULU', name: 'Lululemon Athletica Inc.', sector: 'Consumer', desc: 'Designs and sells athletic apparel, known for yoga pants and premium activewear.' },
+
+  // Consumer Staples
+  { ticker: 'PG', name: 'Procter & Gamble Co.', sector: 'Consumer Staples', desc: 'Makes household and personal care brands including Tide, Pampers, and Gillette.' },
+  { ticker: 'CL', name: 'Colgate-Palmolive Co.', sector: 'Consumer Staples', desc: 'Sells oral care, personal care, and household cleaning products worldwide.' },
+  { ticker: 'MDLZ', name: 'Mondelez International Inc.', sector: 'Consumer Staples', desc: 'Makes snack and confectionery brands including Oreo, Cadbury, and Ritz crackers.' },
+
+  // Industrials
+  { ticker: 'GE', name: 'GE Aerospace', sector: 'Industrials', desc: 'Designs and manufactures jet engines for commercial and military aircraft.' },
+  { ticker: 'HON', name: 'Honeywell International Inc.', sector: 'Industrials', desc: 'Makes aerospace equipment, building automation systems, and industrial safety products.' },
+  { ticker: 'LMT', name: 'Lockheed Martin Corp.', sector: 'Industrials', desc: 'A defense contractor building military aircraft, missiles, and space systems.' },
+  { ticker: 'RTX', name: 'RTX Corp.', sector: 'Industrials', desc: 'Makes jet engines, defense systems, and avionics through its Collins Aerospace and Raytheon divisions.' },
+  { ticker: 'UPS', name: 'United Parcel Service Inc.', sector: 'Industrials', desc: 'Operates a global package delivery and logistics network for businesses and consumers.' },
+  { ticker: 'FDX', name: 'FedEx Corp.', sector: 'Industrials', desc: 'Provides package delivery, freight, and logistics services worldwide.' },
+  { ticker: 'DE', name: 'Deere & Co.', sector: 'Industrials', desc: 'Manufactures agricultural, construction, and forestry equipment sold under the John Deere brand.' },
+  { ticker: 'UNP', name: 'Union Pacific Corp.', sector: 'Industrials', desc: 'Operates one of the largest freight railroad networks in the western United States.' },
+
+  // Energy
+  { ticker: 'COP', name: 'ConocoPhillips', sector: 'Energy', desc: 'Explores for and produces crude oil and natural gas across multiple countries.' },
+  { ticker: 'SLB', name: 'SLB (Schlumberger)', sector: 'Energy', desc: 'Provides technology and services that oil and gas companies use to locate and extract reserves.' },
+  { ticker: 'PSX', name: 'Phillips 66', sector: 'Energy', desc: 'Refines crude oil into fuels and operates pipelines and chemical manufacturing plants.' },
+
+  // Utilities
+  { ticker: 'NEE', name: 'NextEra Energy Inc.', sector: 'Utilities', desc: 'Operates a large electric utility in Florida and is a major generator of wind and solar power.' },
+  { ticker: 'DUK', name: 'Duke Energy Corp.', sector: 'Utilities', desc: 'Provides electricity and natural gas to millions of customers across the southeastern US.' },
+  { ticker: 'SO', name: 'Southern Co.', sector: 'Utilities', desc: 'A regulated electric and gas utility serving customers primarily in the southeastern US.' },
+
+  // Real Estate
+  { ticker: 'AMT', name: 'American Tower Corp.', sector: 'Real Estate', desc: 'Owns and leases wireless communication towers to telecom carriers worldwide.' },
+  { ticker: 'PLD', name: 'Prologis Inc.', sector: 'Real Estate', desc: 'Owns and operates large logistics and warehouse properties leased to e-commerce and distribution companies.' },
+  { ticker: 'EQIX', name: 'Equinix Inc.', sector: 'Real Estate', desc: 'Operates data centers where companies house servers and connect to cloud and network providers.' },
+
+  // Materials
+  { ticker: 'LIN', name: 'Linde plc', sector: 'Materials', desc: 'Produces and distributes industrial gases used across manufacturing, healthcare, and energy sectors.' },
+  { ticker: 'FCX', name: 'Freeport-McMoRan Inc.', sector: 'Materials', desc: 'Mines copper and gold, with major operations in North and South America and Indonesia.' },
+  { ticker: 'NEM', name: 'Newmont Corp.', sector: 'Materials', desc: 'One of the world\'s largest gold mining companies, with operations across several continents.' },
+
+  // Communication
+  { ticker: 'T', name: 'AT&T Inc.', sector: 'Communication', desc: 'Provides wireless, broadband, and fiber internet services across the United States.' },
+  { ticker: 'VZ', name: 'Verizon Communications Inc.', sector: 'Communication', desc: 'Operates a major US wireless network along with home internet and business communication services.' },
+  { ticker: 'TMUS', name: 'T-Mobile US Inc.', sector: 'Communication', desc: 'Runs a nationwide wireless network known for aggressive pricing and early 5G rollout.' },
+  { ticker: 'CMCSA', name: 'Comcast Corp.', sector: 'Communication', desc: 'Provides cable internet and TV service and owns NBCUniversal\'s film, TV, and theme park businesses.' },
+
+  // Auto
+  { ticker: 'F', name: 'Ford Motor Co.', sector: 'Consumer', desc: 'Designs and manufactures cars, trucks, and SUVs, including a growing electric vehicle lineup.' },
+  { ticker: 'GM', name: 'General Motors Co.', sector: 'Consumer', desc: 'Manufactures vehicles under Chevrolet, GMC, Cadillac, and Buick, with expanding EV production.' },
+
+  // Airlines
+  { ticker: 'DAL', name: 'Delta Air Lines Inc.', sector: 'Industrials', desc: 'Operates one of the largest US airlines, flying passengers and cargo domestically and internationally.' },
+  { ticker: 'UAL', name: 'United Airlines Holdings Inc.', sector: 'Industrials', desc: 'Operates a major US airline with an extensive international route network.' }
 ];
 
 function uid(){ return 'id' + (uidCounter++) + '-' + Date.now().toString(36); }
