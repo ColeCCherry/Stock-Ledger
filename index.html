@@ -258,6 +258,19 @@ main{
 }
 .field input:focus{ outline: none; border-color: var(--accent-gold); }
 
+.field textarea{
+  width: 100%;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 12px;
+  padding: 6px 8px;
+  resize: vertical;
+}
+.field textarea:focus{ outline: none; border-color: var(--accent-gold); }
+
 .gainloss-row{
   margin-top: 14px;
   padding-top: 14px;
@@ -315,6 +328,22 @@ main{
 .add-row{ display: flex; gap: 8px; }
 .add-row input{ flex: 1; }
 .add-hint{ font-size: 11px; color: var(--text-dim); }
+
+.list-search{
+  margin-bottom: 14px;
+}
+.list-search input{
+  width: 100%;
+  max-width: 320px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 13px;
+  padding: 9px 12px;
+}
+.list-search input:focus{ outline: none; border-color: var(--accent-gold); }
 
 .discover-controls{
   display: flex;
@@ -378,6 +407,55 @@ main{
   grid-template-columns: 260px 1fr;
   gap: 20px;
   align-items: start;
+}
+.portfolio-layout > .dividend-panel-stack{
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.donut-wrap{
+  display: flex;
+  justify-content: center;
+  margin: 14px 0;
+}
+.donut{
+  width: 130px;
+  height: 130px;
+  border-radius: 50%;
+  position: relative;
+}
+.donut::after{
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 68px; height: 68px;
+  background: var(--bg-panel);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+.alloc-legend{
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.alloc-row{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.alloc-swatch{
+  width: 9px; height: 9px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.alloc-ticker{
+  font-family: 'IBM Plex Mono', monospace;
+  flex: 1;
+}
+.alloc-pct{
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--text-dim);
 }
 .dividend-panel{
   background: var(--bg-panel);
@@ -624,6 +702,13 @@ main{
 }
 .ticker.clickable:hover{ text-decoration-color: var(--accent-gold); }
 
+.earnings-badge{
+  font-size: 11px;
+  color: var(--accent-gold);
+  font-family: 'IBM Plex Mono', monospace;
+  margin-top: 10px;
+}
+
 .analyst-block{
   margin-top: 12px;
   padding-top: 12px;
@@ -831,6 +916,38 @@ function analystTrendIsFresh(trend){
   if (!trend || !trend.ts) return false;
   return new Date(trend.ts).toDateString() === new Date().toDateString();
 }
+async function fetchNextEarnings(ticker){
+  const from = new Date();
+  const to = new Date();
+  to.setDate(to.getDate() + 120);
+  const fmt = d => d.toISOString().slice(0, 10);
+  const res = await fetch(`https://finnhub.io/api/v1/calendar/earnings?from=${fmt(from)}&to=${fmt(to)}&symbol=${encodeURIComponent(ticker)}&token=${FINNHUB_KEY}`);
+  const json = await res.json();
+  const list = json && json.earningsCalendar;
+  if (!Array.isArray(list) || !list.length) return null;
+  const upcoming = list.filter(e => e.date >= fmt(from)).sort((a, b) => a.date.localeCompare(b.date));
+  if (!upcoming.length) return null;
+  const e = upcoming[0];
+  return { date: e.date, hour: e.hour, epsEstimate: e.epsEstimate, ts: Date.now() };
+}
+async function attachEarnings(target, ticker){
+  if (target.nextEarnings && target.nextEarnings.ts && new Date(target.nextEarnings.ts).toDateString() === new Date().toDateString()) return;
+  try{
+    target.nextEarnings = await fetchNextEarnings(ticker);
+  }catch(err){
+    console.error(`Earnings lookup failed for ${ticker}`, err);
+  }
+}
+async function attachFinnhubExtras(target, ticker){
+  await Promise.all([attachAnalystTrend(target, ticker), attachEarnings(target, ticker)]);
+}
+function earningsBadgeHtml(nextEarnings){
+  if (!nextEarnings || !nextEarnings.date) return '';
+  const d = new Date(nextEarnings.date + 'T00:00:00');
+  const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const hourLabel = nextEarnings.hour === 'bmo' ? ' (before open)' : nextEarnings.hour === 'amc' ? ' (after close)' : '';
+  return `<div class="earnings-badge">📅 Earnings: ${label}${hourLabel}</div>`;
+}
 async function attachAnalystTrend(target, ticker){
   if (analystTrendIsFresh(target.analystTrend)) return; // already have today's data
   try{
@@ -866,7 +983,7 @@ async function fetchDailySeries(ticker){
 }
 
 const STORAGE_KEY = 'ledger-data';
-let state = { holdings: [], watchlist: [], lastRefresh: null, discoverPrices: {}, dailyUsage: { date: '', count: 0 }, priceHistory: {}, finnhubInfo: {} };
+let state = { holdings: [], watchlist: [], lastRefresh: null, discoverPrices: {}, dailyUsage: { date: '', count: 0 }, priceHistory: {}, finnhubInfo: {}, portfolioHistory: [] };
 let currentTab = 'portfolio';
 let uidCounter = 1;
 let discoverQuery = '';
@@ -1031,7 +1148,7 @@ async function loadState(){
     if (!res.ok) throw new Error('Supabase load error ' + res.status);
     const rows = await res.json();
     if (rows && rows.length && rows[0].data && Object.keys(rows[0].data).length){
-      state = Object.assign({holdings:[], watchlist:[], lastRefresh:null, discoverPrices:{}, dailyUsage:{date:'',count:0}, priceHistory:{}, finnhubInfo:{}}, rows[0].data);
+      state = Object.assign({holdings:[], watchlist:[], lastRefresh:null, discoverPrices:{}, dailyUsage:{date:'',count:0}, priceHistory:{}, finnhubInfo:{}, portfolioHistory:[]}, rows[0].data);
       return true;
     }
   }catch(e){
@@ -1120,6 +1237,119 @@ function renderSummary(){
       <div class="summary-value" style="color:var(--${t.gain >= 0 ? 'gain' : 'loss'})">${fmtMoney(t.gain)} (${fmtPct(t.gainPct)})</div>
     </div>
   `;
+}
+
+const ALLOCATION_COLORS = ['#D4A24C', '#4FA37D', '#5B8FD9', '#C1554D', '#9B7FD4', '#D97A9C', '#6EC1C9', '#B8A26E', '#7FA0C0', '#C97F5B'];
+
+function renderAllocationPanel(){
+  if (!state.holdings.length){
+    return `<div class="dividend-panel">
+      <h3>Allocation</h3>
+      <div class="panel-sub">Portfolio breakdown</div>
+      <div class="dividend-empty">Add a holding to see your allocation here.</div>
+    </div>`;
+  }
+  const rows = state.holdings.map(h => ({
+    ticker: h.ticker,
+    value: (h.currentPrice || h.costBasis || 0) * (h.shares || 0)
+  })).filter(r => r.value > 0);
+
+  if (!rows.length){
+    return `<div class="dividend-panel">
+      <h3>Allocation</h3>
+      <div class="panel-sub">Portfolio breakdown</div>
+      <div class="dividend-empty">Prices haven't loaded yet — refresh to see your breakdown.</div>
+    </div>`;
+  }
+
+  const total = rows.reduce((s, r) => s + r.value, 0);
+  rows.sort((a, b) => b.value - a.value);
+
+  let cumPct = 0;
+  const stops = rows.map((r, i) => {
+    const pct = (r.value / total) * 100;
+    const color = ALLOCATION_COLORS[i % ALLOCATION_COLORS.length];
+    const start = cumPct;
+    cumPct += pct;
+    return `${color} ${start.toFixed(2)}% ${cumPct.toFixed(2)}%`;
+  }).join(', ');
+
+  const legend = rows.map((r, i) => {
+    const pct = (r.value / total) * 100;
+    const color = ALLOCATION_COLORS[i % ALLOCATION_COLORS.length];
+    return `<div class="alloc-row">
+      <span class="alloc-swatch" style="background:${color}"></span>
+      <span class="alloc-ticker">${r.ticker}</span>
+      <span class="alloc-pct">${pct.toFixed(1)}%</span>
+    </div>`;
+  }).join('');
+
+  return `
+    <div class="dividend-panel">
+      <h3>Allocation</h3>
+      <div class="panel-sub">Portfolio breakdown</div>
+      <div class="donut-wrap">
+        <div class="donut" style="background: conic-gradient(${stops});"></div>
+      </div>
+      <div class="alloc-legend">${legend}</div>
+    </div>`;
+}
+
+function recordPortfolioSnapshot(){
+  if (!state.holdings.length) return;
+  const value = state.holdings.reduce((s, h) => s + (h.currentPrice || h.costBasis || 0) * (h.shares || 0), 0);
+  if (!value) return;
+  const today = todayStr();
+  if (!state.portfolioHistory) state.portfolioHistory = [];
+  const last = state.portfolioHistory[state.portfolioHistory.length - 1];
+  if (last && last.date === today){
+    last.value = value;
+  } else {
+    state.portfolioHistory.push({ date: today, value });
+    if (state.portfolioHistory.length > 365) state.portfolioHistory.shift();
+  }
+}
+
+function renderPortfolioHistoryPanel(){
+  const history = state.portfolioHistory || [];
+  if (history.length < 2){
+    return `<div class="dividend-panel">
+      <h3>Value over time</h3>
+      <div class="panel-sub">Portfolio history</div>
+      <div class="dividend-empty">Check back after a few days of daily updates to see your trend here.</div>
+    </div>`;
+  }
+  const values = history.map(h => h.value);
+  const first = values[0];
+  const latest = values[values.length - 1];
+  const changePct = first ? ((latest - first) / first * 100) : 0;
+  const dirClass = changePct > 0 ? 'up' : (changePct < 0 ? 'down' : '');
+
+  const w = 220, h = 90, pad = 6;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = (max - min) || 1;
+  const stepX = values.length > 1 ? (w - pad * 2) / (values.length - 1) : 0;
+  const points = values.map((v, i) => {
+    const x = pad + i * stepX;
+    const y = pad + (h - pad * 2) * (1 - (v - min) / range);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const lineColor = changePct >= 0 ? 'var(--gain)' : 'var(--loss)';
+
+  return `
+    <div class="dividend-panel">
+      <h3>Value over time</h3>
+      <div class="panel-sub">Since ${history[0].date}</div>
+      <div class="dividend-total">
+        <div class="label">Current value</div>
+        <div class="amount">${fmtMoney(latest)}</div>
+        <div class="change ${dirClass}" style="margin-top:4px;">${fmtPct(changePct)} since first tracked</div>
+      </div>
+      <svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" xmlns="http://www.w3.org/2000/svg">
+        <polyline points="${points}" fill="none" stroke="${lineColor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>
+      </svg>
+    </div>`;
 }
 
 function renderDividendPanel(){
@@ -1233,12 +1463,17 @@ function holdingCard(h){
         <label>Date purchased</label>
         <input type="date" value="${h.purchaseDate || ''}" onchange="updateTextField('holdings','${h.id}','purchaseDate', this.value)">
       </div>
+      <div class="field" style="grid-column: 1 / -1;">
+        <label>Notes</label>
+        <textarea rows="2" placeholder="Why you bought it, your thesis, anything to remember…" onchange="updateTextField('holdings','${h.id}','notes', this.value)">${escapeHtml(h.notes || '')}</textarea>
+      </div>
     </div>
     <div class="gainloss-row">
       <span>Gain / loss</span>
       <span class="val ${gain >= 0 ? 'up' : 'down'}">${fmtMoney(gain)} (${fmtPct(gainPct)})</span>
     </div>
     <button class="btn insight-btn" onclick="openChart('${h.ticker}','${(h.name || '').replace(/'/g, "\\'")}')">🔍 Deep dive</button>
+    ${earningsBadgeHtml(h.nextEarnings)}
     ${analystBlockHtml(h.analystTrend)}
   </div>`;
 }
@@ -1258,7 +1493,12 @@ function watchCard(w){
       <span class="price">${fmtMoney(w.currentPrice)}</span>
       <span class="change ${dayDir}">${fmtPct(w.changePct)} today</span>
     </div>
+    <div class="field" style="margin-top:10px;">
+      <label>Notes</label>
+      <textarea rows="2" placeholder="Why you're watching this…" onchange="updateTextField('watchlist','${w.id}','notes', this.value)">${escapeHtml(w.notes || '')}</textarea>
+    </div>
     <button class="btn insight-btn" onclick="openChart('${w.ticker}','${(w.name || '').replace(/'/g, "\\'")}')">🔍 Deep dive</button>
+    ${earningsBadgeHtml(w.nextEarnings)}
     ${analystBlockHtml(w.analystTrend)}
     <button class="btn" style="margin-top:8px; width:100%;" onclick="moveToPortfolio('${w.id}')">Move to portfolio</button>
   </div>`;
@@ -1283,6 +1523,7 @@ function discoverCard(s){
       </div>
     </div>
     ${priceRow}
+    ${earningsBadgeHtml(p ? p.nextEarnings : null)}
     ${analystBlockHtml(p ? p.analystTrend : null)}
     <button class="btn insight-btn" style="width:100%; margin-top:8px;" onclick="openChart('${s.ticker}','${(s.name || '').replace(/'/g, "\\'")}')">🔍 Deep dive</button>
     <div class="desc">${s.desc}</div>
@@ -1345,7 +1586,7 @@ async function addFromDiscover(ticker){
       const q = await fetchQuote(ticker);
       item.currentPrice = q.price;
       item.changePct = q.changePct;
-      await attachAnalystTrend(item, ticker);
+      await attachFinnhubExtras(item, ticker);
       await saveState();
       render();
     }catch(err){
@@ -1381,7 +1622,7 @@ async function addOwnedFromDiscover(ticker){
       const q = await fetchQuote(ticker);
       item.currentPrice = q.price;
       item.changePct = q.changePct;
-      await attachAnalystTrend(item, ticker);
+      await attachFinnhubExtras(item, ticker);
       await saveState();
       render();
     }catch(err){
@@ -1409,23 +1650,62 @@ function addCardHtml(list){
   </div>`;
 }
 
+let portfolioQuery = '';
+let watchlistQuery = '';
+
+function matchesQuery(item, query){
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return item.ticker.toLowerCase().includes(q) || (item.name || '').toLowerCase().includes(q);
+}
+
+function searchBarHtml(id, value, placeholder, onInputFn){
+  return `<div class="list-search"><input id="${id}" placeholder="${placeholder}" value="${value}" oninput="${onInputFn}(this.value)"></div>`;
+}
+
+function onPortfolioSearch(v){
+  portfolioQuery = v;
+  const pos = document.getElementById('portfolio-search') ? document.getElementById('portfolio-search').selectionStart : null;
+  render();
+  const el = document.getElementById('portfolio-search');
+  if (el){ el.focus(); if (pos !== null) el.setSelectionRange(pos, pos); }
+}
+function onWatchlistSearch(v){
+  watchlistQuery = v;
+  const pos = document.getElementById('watchlist-search') ? document.getElementById('watchlist-search').selectionStart : null;
+  render();
+  const el = document.getElementById('watchlist-search');
+  if (el){ el.focus(); if (pos !== null) el.setSelectionRange(pos, pos); }
+}
+
 function render(){
   renderTape();
   renderSummary();
   const content = document.getElementById('content');
   if (currentTab === 'portfolio'){
-    const cards = state.holdings.map(holdingCard).join('');
+    const filtered = state.holdings.filter(h => matchesQuery(h, portfolioQuery));
+    const cards = filtered.map(holdingCard).join('');
+    const searchHtml = state.holdings.length > 3 ? searchBarHtml('portfolio-search', portfolioQuery, 'Search your holdings…', 'onPortfolioSearch') : '';
     content.innerHTML = `
       <div class="portfolio-layout">
-        ${renderDividendPanel()}
-        <div class="grid">${cards}${addCardHtml('holdings')}</div>
+        <div class="dividend-panel-stack">
+          ${renderAllocationPanel()}
+          ${renderDividendPanel()}
+          ${renderPortfolioHistoryPanel()}
+        </div>
+        <div>
+          ${searchHtml}
+          <div class="grid">${cards}${addCardHtml('holdings')}</div>
+        </div>
       </div>`;
   } else if (currentTab === 'watchlist'){
+    const filtered = state.watchlist.filter(w => matchesQuery(w, watchlistQuery));
+    const searchHtml = state.watchlist.length > 3 ? searchBarHtml('watchlist-search', watchlistQuery, 'Search your watchlist…', 'onWatchlistSearch') : '';
     if (!state.watchlist.length){
       content.innerHTML = `<div class="grid">${addCardHtml('watchlist')}</div>`;
     } else {
-      const cards = state.watchlist.map(watchCard).join('');
-      content.innerHTML = `<div class="grid">${cards}${addCardHtml('watchlist')}</div>`;
+      const cards = filtered.map(watchCard).join('');
+      content.innerHTML = `${searchHtml}<div class="grid">${cards}${addCardHtml('watchlist')}</div>`;
     }
   } else if (currentTab === 'discover'){
     content.innerHTML = renderDiscover();
@@ -1499,7 +1779,7 @@ async function addItem(list){
     const q = await fetchQuote(ticker);
     item.currentPrice = q.price;
     item.changePct = q.changePct;
-    await attachAnalystTrend(item, ticker);
+    await attachFinnhubExtras(item, ticker);
     await saveState();
     render();
     showToast(`${ticker} added — price loaded.`);
@@ -1530,14 +1810,14 @@ async function loadDiscoverPrices(){
   try{
     for (const s of filtered){
       if (state.discoverPrices[s.ticker]){
-        await attachAnalystTrend(state.discoverPrices[s.ticker], s.ticker);
+        await attachFinnhubExtras(state.discoverPrices[s.ticker], s.ticker);
         updated++;
         continue;
       } // already cached, skip a quota hit
       try{
         const q2 = await fetchQuote(s.ticker);
         state.discoverPrices[s.ticker] = { price: q2.price, changePct: q2.changePct, ts: Date.now() };
-        await attachAnalystTrend(state.discoverPrices[s.ticker], s.ticker);
+        await attachFinnhubExtras(state.discoverPrices[s.ticker], s.ticker);
         updated++;
       }catch(err){
         if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
@@ -1580,7 +1860,7 @@ async function refreshPrices(){
         } else {
           unchanged++;
         }
-        await attachAnalystTrend(item, item.ticker);
+        await attachFinnhubExtras(item, item.ticker);
       }catch(err){
         if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
         console.error(`Price lookup failed for ${item.ticker}`, err);
@@ -1588,6 +1868,7 @@ async function refreshPrices(){
       await sleep(900);
     }
     state.lastRefresh = new Date().toISOString();
+    recordPortfolioSnapshot();
     await saveState();
     render();
     if (rateLimited){
@@ -1713,14 +1994,15 @@ async function openChart(ticker, name){
     : fetchDailySeries(ticker).then(v => ({ status: 'fulfilled', value: v })).catch(e => ({ status: 'rejected', reason: e })));
   jobs.push(infoIsFresh
     ? Promise.resolve({ status: 'fulfilled', value: cachedInfo })
-    : Promise.allSettled([fetchProfile(ticker), fetchBasicFinancials(ticker), fetchAnalystTrend(ticker), fetchCompanyNews(ticker)])
-        .then(([p, m, t, n]) => ({
+    : Promise.allSettled([fetchProfile(ticker), fetchBasicFinancials(ticker), fetchAnalystTrend(ticker), fetchCompanyNews(ticker), fetchNextEarnings(ticker)])
+        .then(([p, m, t, n, e]) => ({
           status: 'fulfilled',
           value: {
             profile: p.status === 'fulfilled' ? p.value : null,
             metrics: m.status === 'fulfilled' ? m.value : null,
             analystTrend: t.status === 'fulfilled' ? t.value : null,
             news: n.status === 'fulfilled' ? n.value : [],
+            nextEarnings: e.status === 'fulfilled' ? e.value : null,
             date: todayStr()
           }
         })));
@@ -1773,7 +2055,8 @@ function renderCompanyInfoHtml(info){
         <div><span class="info-label">IPO date</span><span class="info-val">${p.ipo || '—'}</span></div>
       </div>
       ${p.weburl ? `<a href="${p.weburl}" target="_blank" rel="noopener" class="info-link">${p.weburl.replace(/^https?:\/\//, '')}</a>` : ''}
-    </div>` : '';
+      ${earningsBadgeHtml(info.nextEarnings)}
+    </div>` : (info.nextEarnings ? `<div class="info-section">${earningsBadgeHtml(info.nextEarnings)}</div>` : '');
 
   const peVal = pickMetric(m, ['peTTM', 'peBasicExclExtraTTM', 'peExclExtraTTM', 'peNormalizedAnnual']);
   const epsVal = pickMetric(m, ['epsTTM', 'epsInclExtraItemsTTM', 'epsBasicExclExtraItemsTTM']);
@@ -1949,7 +2232,7 @@ async function autoFetchDiscover(limit){
       }
       entry.ts = Date.now(); // mark as checked today either way, so we don't re-check it again before other stocks
       state.discoverPrices[s.ticker] = entry;
-      await attachAnalystTrend(entry, s.ticker);
+      await attachFinnhubExtras(entry, s.ticker);
       fetched++;
       if (currentTab === 'discover') renderContentOnly();
     }catch(err){
@@ -1989,7 +2272,7 @@ async function dailyAutoRun(){
           item.changePct = q.changePct;
           changed++;
         }
-        await attachAnalystTrend(item, item.ticker);
+        await attachFinnhubExtras(item, item.ticker);
       }catch(err){
         if (err.message === 'RATE_LIMIT'){ rateLimited = true; break; }
         console.error(`Daily check failed for ${item.ticker}`, err);
@@ -2005,7 +2288,9 @@ async function dailyAutoRun(){
       discoverResult = await autoFetchDiscover(remaining);
     }
 
+    recordPortfolioSnapshot();
     await saveState(); // persist the actual price/dividend updates from this run
+    render();
 
     const bits = [];
     if (portfolioItems.length) bits.push(`checked your ${portfolioItems.length} stock${portfolioItems.length === 1 ? '' : 's'} (${changed} moved)`);
