@@ -676,6 +676,39 @@ main{
 
 .hidden{ display: none !important; }
 
+.quota-banner{
+  background: rgba(212, 162, 76, 0.1);
+  border: 1px solid var(--accent-gold);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.quota-banner-text{
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.quota-banner-text strong{ color: var(--accent-gold); }
+
+.keys-form-note{
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+.keys-form-note a{ color: var(--accent-gold); }
+.keys-status{
+  font-size: 11px;
+  margin-top: 4px;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.keys-status.set{ color: var(--gain); }
+.keys-status.unset{ color: var(--text-dim); }
+
 .auth-gate{
   position: fixed;
   inset: 0;
@@ -926,16 +959,22 @@ main{
   </div>
   <div class="spacer"></div>
   <span id="usage-badge" style="font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-dim); margin-right:4px;"></span>
+  <button class="btn" onclick="openKeysModal()" title="Set up your own API keys">⚙ My API keys</button>
   <button class="btn" onclick="signOut()" title="Log out">Log out</button>
   <button class="btn primary" id="refresh-btn" onclick="refreshPrices()">Refresh prices</button>
 </div>
 
 <main>
+  <div id="quota-banner"></div>
   <div class="summary-row" id="summary-row"></div>
   <div id="content"></div>
 </main>
 
 <div class="toast" id="toast"></div>
+</div>
+
+<div class="chart-overlay" id="keys-overlay" onclick="if(event.target===this) closeKeysModal()">
+  <div class="chart-modal" id="keys-modal"></div>
 </div>
 
 <div class="auth-gate" id="auth-gate">
@@ -966,13 +1005,17 @@ const SUPABASE_URL = 'https://etprvicvwxudexzkkkrf.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_vUJ4QnqmpJnuAN6qR0kmqg_85X_4FIg';
 const SUPABASE_REST = `${SUPABASE_URL}/rest/v1/ledger`;
 
-// Both providers are now called through a Netlify serverless function, which holds the
-// real API keys as environment variables. The keys never appear in this client-side code.
+// Both providers are called through a Netlify serverless function. If the signed-in user has
+// added their own free API keys (state.apiKeys), those are used instead of the shared app keys,
+// so their daily quota is genuinely their own rather than shared with other users.
 function avUrl(fn, symbol){
-  return `/.netlify/functions/market-data?provider=av&function=${encodeURIComponent(fn)}&symbol=${encodeURIComponent(symbol)}`;
+  const userKey = state.apiKeys && state.apiKeys.alphaVantage;
+  const qs = new URLSearchParams({ provider: 'av', function: fn, symbol, ...(userKey ? { userKey } : {}) }).toString();
+  return `/.netlify/functions/market-data?${qs}`;
 }
 function finnhubUrl(path, params){
-  const qs = new URLSearchParams({ provider: 'finnhub', path, ...params }).toString();
+  const userKey = state.apiKeys && state.apiKeys.finnhub;
+  const qs = new URLSearchParams({ provider: 'finnhub', path, ...params, ...(userKey ? { userKey } : {}) }).toString();
   return `/.netlify/functions/market-data?${qs}`;
 }
 function isRateLimited(json){
@@ -1112,7 +1155,8 @@ function analystBlockHtml(trend){
 }
 
 async function fetchDailySeries(ticker){
-  const url = `/.netlify/functions/market-data?provider=av&function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(ticker)}&outputsize=full`;
+  const userKey = state.apiKeys && state.apiKeys.alphaVantage;
+  const url = `/.netlify/functions/market-data?provider=av&function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(ticker)}&outputsize=full${userKey ? `&userKey=${encodeURIComponent(userKey)}` : ''}`;
   const res = await fetch(url);
   const json = await res.json();
   trackApiUse();
@@ -1126,7 +1170,7 @@ async function fetchDailySeries(ticker){
 }
 
 const STORAGE_KEY = 'ledger-data';
-let state = { holdings: [], watchlist: [], lastRefresh: null, discoverPrices: {}, dailyUsage: { date: '', count: 0 }, priceHistory: {}, finnhubInfo: {}, portfolioHistory: [] };
+let state = { holdings: [], watchlist: [], lastRefresh: null, discoverPrices: {}, dailyUsage: { date: '', count: 0 }, priceHistory: {}, finnhubInfo: {}, portfolioHistory: [], apiKeys: { alphaVantage: '', finnhub: '' } };
 let currentTab = 'portfolio';
 let uidCounter = 1;
 let discoverQuery = '';
@@ -1373,7 +1417,7 @@ async function loadState(){
     if (!res.ok) throw new Error('Supabase load error ' + res.status);
     const rows = await res.json();
     if (rows && rows.length && rows[0].data && Object.keys(rows[0].data).length){
-      state = Object.assign({holdings:[], watchlist:[], lastRefresh:null, discoverPrices:{}, dailyUsage:{date:'',count:0}, priceHistory:{}, finnhubInfo:{}, portfolioHistory:[]}, rows[0].data);
+      state = Object.assign({holdings:[], watchlist:[], lastRefresh:null, discoverPrices:{}, dailyUsage:{date:'',count:0}, priceHistory:{}, finnhubInfo:{}, portfolioHistory:[], apiKeys:{alphaVantage:'',finnhub:''}}, rows[0].data);
       return true;
     }
     // No row yet for this user — create one
@@ -1451,6 +1495,74 @@ function renderTape(){
     });
   }
   tape.innerHTML = html;
+}
+
+function hasOwnKeys(){
+  return !!(state.apiKeys && state.apiKeys.alphaVantage && state.apiKeys.finnhub);
+}
+
+function renderQuotaBanner(){
+  const el = document.getElementById('quota-banner');
+  if (!el) return;
+  if (hasOwnKeys()){
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = `
+    <div class="quota-banner">
+      <div class="quota-banner-text">
+        You're currently sharing a <strong>limited daily lookup quota</strong> with everyone else using this app.
+        Add your own free API keys to get your own separate quota — takes about 5 minutes.
+      </div>
+      <button class="btn primary" onclick="openKeysModal()" style="white-space:nowrap;">Set up my own keys</button>
+    </div>`;
+}
+
+function openKeysModal(){
+  const av = (state.apiKeys && state.apiKeys.alphaVantage) || '';
+  const fh = (state.apiKeys && state.apiKeys.finnhub) || '';
+  document.getElementById('keys-modal').innerHTML = `
+    <div class="chart-modal-head">
+      <div><div class="ct-ticker">My API keys</div><div class="ct-name">Get your own separate daily quota</div></div>
+      <button class="ct-close" onclick="closeKeysModal()">✕</button>
+    </div>
+    <div class="keys-form-note" style="margin-top:14px;">
+      This app uses two free data providers. Right now you're sharing the app owner's keys with everyone else.
+      Adding your own — free, no credit card — means your usage is entirely your own, with its own daily limit.
+    </div>
+
+    <div class="field" style="margin-bottom:6px;">
+      <label>Alpha Vantage key</label>
+      <input type="text" id="key-input-av" placeholder="Paste your key here" value="${escapeHtml(av)}">
+    </div>
+    <div class="keys-status ${av ? 'set' : 'unset'}">${av ? '✓ Set — you have your own price quota' : 'Not set — sharing the app owner\'s quota'}</div>
+    <div class="keys-form-note">Get a free key in about a minute: <a href="https://www.alphavantage.co/support/#api-key" target="_blank" rel="noopener">alphavantage.co/support/#api-key</a> — just enter your email, the key appears instantly on the page.</div>
+
+    <div class="field" style="margin-bottom:6px; margin-top:16px;">
+      <label>Finnhub key</label>
+      <input type="text" id="key-input-fh" placeholder="Paste your key here" value="${escapeHtml(fh)}">
+    </div>
+    <div class="keys-status ${fh ? 'set' : 'unset'}">${fh ? '✓ Set — you have your own analyst/news quota' : 'Not set — sharing the app owner\'s quota'}</div>
+    <div class="keys-form-note">Free, higher limit: <a href="https://finnhub.io/register" target="_blank" rel="noopener">finnhub.io/register</a> — sign up, your key is shown right on your dashboard.</div>
+
+    <button class="btn primary" style="width:100%; margin-top:16px;" onclick="saveApiKeys()">Save my keys</button>
+    <button class="btn" style="width:100%; margin-top:8px;" onclick="closeKeysModal()">Not now</button>
+  `;
+  document.getElementById('keys-overlay').classList.add('open');
+}
+
+function closeKeysModal(){
+  document.getElementById('keys-overlay').classList.remove('open');
+}
+
+async function saveApiKeys(){
+  const av = document.getElementById('key-input-av').value.trim();
+  const fh = document.getElementById('key-input-fh').value.trim();
+  state.apiKeys = { alphaVantage: av, finnhub: fh };
+  await saveState();
+  closeKeysModal();
+  renderQuotaBanner();
+  showToast(av && fh ? "You're all set — using your own keys now." : 'Saved. Add both keys to fully stop sharing the app\'s quota.');
 }
 
 function renderSummary(){
@@ -1998,6 +2110,7 @@ function onWatchlistSearch(v){
 function render(){
   renderTape();
   renderSummary();
+  renderQuotaBanner();
   const content = document.getElementById('content');
   if (currentTab === 'portfolio'){
     const filtered = state.holdings.filter(h => matchesQuery(h, portfolioQuery));

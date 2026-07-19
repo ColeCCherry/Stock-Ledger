@@ -17,19 +17,19 @@ exports.handler = async (event) => {
   }
 
   const params = event.queryStringParameters || {};
-  const { provider, path, ...rest } = params;
+  const { provider, path, userKey, ...rest } = params;
 
   try {
     let url;
 
     if (provider === 'av') {
-      const key = process.env.ALPHA_VANTAGE_KEY;
-      if (!key) throw new Error('ALPHA_VANTAGE_KEY is not set on the server');
+      const key = userKey || process.env.ALPHA_VANTAGE_KEY;
+      if (!key) throw new Error('No Alpha Vantage key available');
       const qs = new URLSearchParams({ ...rest, apikey: key }).toString();
       url = `https://www.alphavantage.co/query?${qs}`;
     } else if (provider === 'finnhub') {
-      const key = process.env.FINNHUB_KEY;
-      if (!key) throw new Error('FINNHUB_KEY is not set on the server');
+      const key = userKey || process.env.FINNHUB_KEY;
+      if (!key) throw new Error('No Finnhub key available');
       if (!path) throw new Error('Missing "path" for finnhub request');
       const qs = new URLSearchParams({ ...rest, token: key }).toString();
       url = `https://finnhub.io/api/v1/${path}?${qs}`;
