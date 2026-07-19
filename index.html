@@ -674,6 +674,47 @@ main{
   margin-top: 4px;
 }
 
+.hidden{ display: none !important; }
+
+.auth-gate{
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 20px;
+}
+.auth-gate.hidden{ display: none; }
+.auth-box{
+  width: 100%;
+  max-width: 360px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px;
+}
+.auth-error{
+  background: rgba(193, 85, 77, 0.12);
+  border: 1px solid var(--loss);
+  color: var(--loss);
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 14px;
+  display: none;
+}
+.auth-error.show{ display: block; }
+.auth-toggle{
+  text-align: center;
+  font-size: 12px;
+  color: var(--accent-gold);
+  margin-top: 16px;
+  cursor: pointer;
+}
+.auth-toggle:hover{ text-decoration: underline; }
+
 .chart-overlay{
   position: fixed;
   inset: 0;
@@ -867,6 +908,7 @@ main{
 </head>
 <body>
 
+<div id="app-content" class="hidden">
 <div class="tape-wrap"><div class="tape" id="tape"></div></div>
 
 <header>
@@ -884,6 +926,7 @@ main{
   </div>
   <div class="spacer"></div>
   <span id="usage-badge" style="font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-dim); margin-right:4px;"></span>
+  <button class="btn" onclick="signOut()" title="Log out">Log out</button>
   <button class="btn primary" id="refresh-btn" onclick="refreshPrices()">Refresh prices</button>
 </div>
 
@@ -893,6 +936,26 @@ main{
 </main>
 
 <div class="toast" id="toast"></div>
+</div>
+
+<div class="auth-gate" id="auth-gate">
+  <div class="auth-box">
+    <div class="eyebrow">Personal Markets Desk</div>
+    <h1 style="margin-top:6px;">Ledger</h1>
+    <div class="subtitle" style="margin-bottom:20px;">Sign in to see your portfolio.</div>
+    <div id="auth-error" class="auth-error"></div>
+    <div class="field" style="margin-bottom:10px;">
+      <label>Email</label>
+      <input type="email" id="auth-email" autocomplete="email">
+    </div>
+    <div class="field" style="margin-bottom:16px;">
+      <label>Password</label>
+      <input type="password" id="auth-password" autocomplete="current-password">
+    </div>
+    <button class="btn primary" style="width:100%;" id="auth-submit-btn" onclick="handleAuthSubmit()">Log in</button>
+    <div class="auth-toggle" id="auth-toggle-text" onclick="toggleAuthMode()">Don't have an account? Sign up</div>
+  </div>
+</div>
 
 <div class="chart-overlay" id="chart-overlay" onclick="if(event.target===this) closeChart()">
   <div class="chart-modal" id="chart-modal"></div>
@@ -1217,20 +1280,108 @@ function showToast(msg, ms=2600){
   showToast._h = setTimeout(()=> t.classList.remove('show'), ms);
 }
 
-async function loadState(){
+const SUPABASE_AUTH = `${SUPABASE_URL}/auth/v1`;
+const SESSION_KEY = 'ledger-session';
+let session = null;
+
+function saveSession(data){
+  session = {
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    expires_at: Date.now() + (data.expires_in || 3600) * 1000,
+    user: data.user
+  };
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+function loadSessionFromStorage(){
   try{
-    const res = await fetch(`${SUPABASE_REST}?id=eq.main&select=data`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`
-      }
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (raw) session = JSON.parse(raw);
+  }catch(e){ session = null; }
+}
+function clearSession(){
+  session = null;
+  localStorage.removeItem(SESSION_KEY);
+}
+
+async function signUp(email, password){
+  const res = await fetch(`${SUPABASE_AUTH}/signup`, {
+    method: 'POST',
+    headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.msg || data.error_description || 'Sign up failed');
+  if (data.access_token){ saveSession(data); }
+  return data;
+}
+
+async function signIn(email, password){
+  const res = await fetch(`${SUPABASE_AUTH}/token?grant_type=password`, {
+    method: 'POST',
+    headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error_description || data.msg || 'Login failed');
+  saveSession(data);
+  return data;
+}
+
+function signOut(){
+  clearSession();
+  location.reload();
+}
+
+async function refreshSessionToken(){
+  if (!session || !session.refresh_token) return false;
+  try{
+    const res = await fetch(`${SUPABASE_AUTH}/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: session.refresh_token })
     });
+    const data = await res.json();
+    if (!res.ok) return false;
+    saveSession(data);
+    return true;
+  }catch(e){ return false; }
+}
+
+async function ensureValidSession(){
+  if (!session) return false;
+  if (Date.now() > session.expires_at - 60000){ // refresh a minute early
+    return await refreshSessionToken();
+  }
+  return true;
+}
+
+function authHeaders(){
+  return {
+    'apikey': SUPABASE_KEY,
+    'Authorization': `Bearer ${session ? session.access_token : SUPABASE_KEY}`
+  };
+}
+
+async function loadState(){
+  const userId = session.user.id;
+  try{
+    let res = await fetch(`${SUPABASE_REST}?id=eq.${userId}&select=data`, { headers: authHeaders() });
+    if (res.status === 401 && await refreshSessionToken()){
+      res = await fetch(`${SUPABASE_REST}?id=eq.${userId}&select=data`, { headers: authHeaders() });
+    }
     if (!res.ok) throw new Error('Supabase load error ' + res.status);
     const rows = await res.json();
     if (rows && rows.length && rows[0].data && Object.keys(rows[0].data).length){
       state = Object.assign({holdings:[], watchlist:[], lastRefresh:null, discoverPrices:{}, dailyUsage:{date:'',count:0}, priceHistory:{}, finnhubInfo:{}, portfolioHistory:[]}, rows[0].data);
       return true;
     }
+    // No row yet for this user — create one
+    await fetch(SUPABASE_REST, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ id: userId, data: {} })
+    });
   }catch(e){
     console.error('loadState error', e);
     showToast("Couldn't reach the cloud database — check your connection.");
@@ -1239,17 +1390,20 @@ async function loadState(){
 }
 
 async function saveState(){
+  const userId = session.user.id;
   try{
-    const res = await fetch(`${SUPABASE_REST}?id=eq.main`, {
+    let res = await fetch(`${SUPABASE_REST}?id=eq.${userId}`, {
       method: 'PATCH',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
-      },
+      headers: { ...authHeaders(), 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
       body: JSON.stringify({ data: state, updated_at: new Date().toISOString() })
     });
+    if (res.status === 401 && await refreshSessionToken()){
+      res = await fetch(`${SUPABASE_REST}?id=eq.${userId}`, {
+        method: 'PATCH',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ data: state, updated_at: new Date().toISOString() })
+      });
+    }
     if (!res.ok) throw new Error('Supabase save error ' + res.status);
   }catch(e){
     showToast("Couldn't save to the cloud — check your connection.");
@@ -2469,14 +2623,69 @@ async function dailyAutoRun(){
   }
 }
 
-(async function init(){
+let authMode = 'login'; // 'login' | 'signup'
+
+function toggleAuthMode(){
+  authMode = authMode === 'login' ? 'signup' : 'login';
+  document.getElementById('auth-submit-btn').textContent = authMode === 'login' ? 'Log in' : 'Sign up';
+  document.getElementById('auth-toggle-text').textContent = authMode === 'login'
+    ? "Don't have an account? Sign up"
+    : 'Already have an account? Log in';
+  document.getElementById('auth-error').classList.remove('show');
+}
+
+function showAuthError(msg){
+  const el = document.getElementById('auth-error');
+  el.textContent = msg;
+  el.classList.add('show');
+}
+
+async function handleAuthSubmit(){
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  if (!email || !password){ showAuthError('Enter both an email and password.'); return; }
+  const btn = document.getElementById('auth-submit-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span>Please wait…';
+  try{
+    if (authMode === 'signup'){
+      const result = await signUp(email, password);
+      if (!result.access_token){
+        showAuthError('Account created — check your email to confirm, then log in.');
+        toggleAuthMode();
+        btn.disabled = false;
+        btn.innerHTML = 'Log in';
+        return;
+      }
+    } else {
+      await signIn(email, password);
+    }
+    await startApp();
+  }catch(err){
+    showAuthError(err.message || 'Something went wrong.');
+    btn.disabled = false;
+    btn.innerHTML = authMode === 'login' ? 'Log in' : 'Sign up';
+  }
+}
+
+async function startApp(){
+  document.getElementById('auth-gate').classList.add('hidden');
+  document.getElementById('app-content').classList.remove('hidden');
   const had = await loadState();
-  if (!had) { seedDefaults(); await saveState(); }
+  if (!had){ await saveState(); }
   render();
   updateUsageBadge();
   if (state.lastAutoRunDate !== todayStr()){
     dailyAutoRun(); // fire and forget — runs in the background, doesn't block the UI
   }
+}
+
+(async function init(){
+  loadSessionFromStorage();
+  if (session && await ensureValidSession()){
+    await startApp();
+  }
+  // otherwise the auth-gate screen stays visible, waiting for login/signup
 })();
 </script>
 </body>
