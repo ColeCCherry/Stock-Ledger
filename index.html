@@ -345,6 +345,81 @@ main{
 }
 .list-search input:focus{ outline: none; border-color: var(--accent-gold); }
 
+.cal-header{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.cal-title{
+  font-family: 'IBM Plex Serif', serif;
+  font-size: 18px;
+  font-weight: 600;
+}
+.cal-month-summary{
+  font-size: 13px;
+  margin-bottom: 16px;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.cal-month-summary .up{ color: var(--gain); font-weight: 600; }
+.cal-month-summary .down{ color: var(--loss); font-weight: 600; }
+.cal-grid{
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+.cal-dow{
+  text-align: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  padding-bottom: 6px;
+}
+.cal-cell{
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  min-height: 70px;
+}
+.cal-cell.cal-empty{
+  background: transparent;
+  border: none;
+}
+.cal-cell.cal-today{
+  border-color: var(--accent-gold);
+}
+.cal-cell.up{ border-color: var(--gain); background: rgba(79, 163, 125, 0.08); }
+.cal-cell.down{ border-color: var(--loss); background: rgba(193, 85, 77, 0.08); }
+.cal-day-num{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.cal-change{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 6px;
+}
+.cal-cell.up .cal-change{ color: var(--gain); }
+.cal-cell.down .cal-change{ color: var(--loss); }
+.cal-change-pct{
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.cal-legend-note{
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 14px;
+}
+@media (max-width: 600px){
+  .cal-cell{ min-height: 54px; padding: 5px; }
+  .cal-change{ font-size: 10px; }
+  .cal-change-pct{ display: none; }
+}
+
 .discover-controls{
   display: flex;
   gap: 10px;
@@ -805,6 +880,7 @@ main{
     <button class="tab-btn active" id="tab-portfolio" onclick="setTab('portfolio')">Portfolio</button>
     <button class="tab-btn" id="tab-watchlist" onclick="setTab('watchlist')">Watchlist</button>
     <button class="tab-btn" id="tab-discover" onclick="setTab('discover')">Discover</button>
+    <button class="tab-btn" id="tab-calendar" onclick="setTab('calendar')">Calendar</button>
   </div>
   <div class="spacer"></div>
   <span id="usage-badge" style="font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--text-dim); margin-right:4px;"></span>
@@ -1191,6 +1267,7 @@ function setTab(tab){
   document.getElementById('tab-portfolio').classList.toggle('active', tab === 'portfolio');
   document.getElementById('tab-watchlist').classList.toggle('active', tab === 'watchlist');
   document.getElementById('tab-discover').classList.toggle('active', tab === 'discover');
+  document.getElementById('tab-calendar').classList.toggle('active', tab === 'calendar');
   render();
 }
 
@@ -1536,6 +1613,83 @@ function discoverCard(s){
   </div>`;
 }
 
+// ===== Calendar view =====
+let calendarState = (() => {
+  const d = new Date();
+  return { year: d.getFullYear(), month: d.getMonth() }; // month is 0-indexed
+})();
+
+function computeDailyChanges(){
+  const history = [...(state.portfolioHistory || [])].sort((a, b) => a.date.localeCompare(b.date));
+  const map = {};
+  for (let i = 0; i < history.length; i++){
+    const prev = i > 0 ? history[i - 1].value : null;
+    map[history[i].date] = {
+      value: history[i].value,
+      change: prev !== null ? history[i].value - prev : null,
+      changePct: prev ? (history[i].value - prev) / prev * 100 : null
+    };
+  }
+  return map;
+}
+
+function shiftCalendarMonth(delta){
+  calendarState.month += delta;
+  if (calendarState.month < 0){ calendarState.month = 11; calendarState.year--; }
+  if (calendarState.month > 11){ calendarState.month = 0; calendarState.year++; }
+  renderContentOnly();
+}
+
+function renderCalendarView(){
+  const { year, month } = calendarState;
+  const dailyMap = computeDailyChanges();
+  const monthName = new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  const firstWeekday = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  let monthTotal = 0;
+  let daysWithData = 0;
+  const cells = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push('<div class="cal-cell cal-empty"></div>');
+  for (let day = 1; day <= daysInMonth; day++){
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const entry = dailyMap[dateStr];
+    const isToday = dateStr === todayStr();
+    if (entry && entry.change !== null){
+      monthTotal += entry.change;
+      daysWithData++;
+      const dir = entry.change > 0 ? 'up' : (entry.change < 0 ? 'down' : '');
+      cells.push(`
+        <div class="cal-cell cal-has-data ${dir} ${isToday ? 'cal-today' : ''}">
+          <div class="cal-day-num">${day}</div>
+          <div class="cal-change">${entry.change >= 0 ? '+' : ''}${fmtMoney(entry.change)}</div>
+          <div class="cal-change-pct">${fmtPct(entry.changePct)}</div>
+        </div>`);
+    } else {
+      cells.push(`<div class="cal-cell ${isToday ? 'cal-today' : ''}"><div class="cal-day-num">${day}</div></div>`);
+    }
+  }
+
+  const dowLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => `<div class="cal-dow">${d}</div>`).join('');
+  const monthDir = monthTotal > 0 ? 'up' : (monthTotal < 0 ? 'down' : '');
+
+  return `
+    <div class="cal-header">
+      <button class="btn" onclick="shiftCalendarMonth(-1)">‹ Prev</button>
+      <div class="cal-title">${monthName}</div>
+      <button class="btn" onclick="shiftCalendarMonth(1)">Next ›</button>
+    </div>
+    ${daysWithData ? `
+      <div class="cal-month-summary">
+        Month total: <span class="${monthDir}">${monthTotal >= 0 ? '+' : ''}${fmtMoney(monthTotal)}</span> across ${daysWithData} tracked day${daysWithData === 1 ? '' : 's'}
+      </div>` : `<div class="cal-month-summary" style="color:var(--text-dim);">No tracked days yet this month — check back after the daily update runs a few times.</div>`}
+    <div class="cal-grid">
+      ${dowLabels}
+      ${cells.join('')}
+    </div>
+    <div class="cal-legend-note">Based on your total portfolio value each day the app checked in — not every calendar day may have data.</div>`;
+}
+
 function renderDiscover(){
   const sectors = ['All', ...new Set(DISCOVER_STOCKS.map(s => s.sector))];
   const q = discoverQuery.toLowerCase();
@@ -1562,7 +1716,12 @@ function onDiscoverSearch(v){ discoverQuery = v; renderContentOnly(); }
 function onDiscoverSector(v){ discoverSector = v; renderContentOnly(); }
 
 function renderContentOnly(){
-  document.getElementById('content').innerHTML = renderDiscover();
+  const content = document.getElementById('content');
+  if (currentTab === 'calendar'){
+    content.innerHTML = renderCalendarView();
+  } else {
+    content.innerHTML = renderDiscover();
+  }
 }
 
 async function addFromDiscover(ticker){
@@ -1709,6 +1868,8 @@ function render(){
     }
   } else if (currentTab === 'discover'){
     content.innerHTML = renderDiscover();
+  } else if (currentTab === 'calendar'){
+    content.innerHTML = renderCalendarView();
   }
 }
 
