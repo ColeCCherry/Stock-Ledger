@@ -8,6 +8,14 @@ exports.handler = async (event) => {
     'Access-Control-Allow-Origin': '*'
   };
 
+  // Basic abuse guard: only allow requests that appear to come from this site itself,
+  // so this function can't be casually used as a free open proxy by other sites/bots.
+  const origin = event.headers.origin || event.headers.referer || '';
+  const host = event.headers.host || '';
+  if (host && origin && !origin.includes(host)){
+    return { statusCode: 403, headers, body: JSON.stringify({ error: 'Forbidden' }) };
+  }
+
   const params = event.queryStringParameters || {};
   const { provider, path, ...rest } = params;
 
