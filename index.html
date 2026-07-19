@@ -903,9 +903,14 @@ const SUPABASE_URL = 'https://etprvicvwxudexzkkkrf.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_vUJ4QnqmpJnuAN6qR0kmqg_85X_4FIg';
 const SUPABASE_REST = `${SUPABASE_URL}/rest/v1/ledger`;
 
-const ALPHA_VANTAGE_KEY = '6EASXIO49870WEEN';
+// Both providers are now called through a Netlify serverless function, which holds the
+// real API keys as environment variables. The keys never appear in this client-side code.
 function avUrl(fn, symbol){
-  return `https://www.alphavantage.co/query?function=${fn}&symbol=${encodeURIComponent(symbol)}&apikey=${ALPHA_VANTAGE_KEY}`;
+  return `/.netlify/functions/market-data?provider=av&function=${encodeURIComponent(fn)}&symbol=${encodeURIComponent(symbol)}`;
+}
+function finnhubUrl(path, params){
+  const qs = new URLSearchParams({ provider: 'finnhub', path, ...params }).toString();
+  return `/.netlify/functions/market-data?${qs}`;
 }
 function isRateLimited(json){
   return !!(json && (json['Note'] || json['Information']));
@@ -961,9 +966,8 @@ async function fetchOverview(ticker){
 }
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-const FINNHUB_KEY = 'd9bd3qpr01qmk4glacagd9bd3qpr01qmk4glacb0';
 async function fetchAnalystTrend(ticker){
-  const res = await fetch(`https://finnhub.io/api/v1/stock/recommendation?symbol=${encodeURIComponent(ticker)}&token=${FINNHUB_KEY}`);
+  const res = await fetch(finnhubUrl('stock/recommendation', { symbol: ticker }));
   if (!res.ok) throw new Error('NO_DATA');
   const json = await res.json();
   if (!Array.isArray(json) || !json.length) throw new Error('NO_DATA');
@@ -997,7 +1001,7 @@ async function fetchNextEarnings(ticker){
   const to = new Date();
   to.setDate(to.getDate() + 120);
   const fmt = d => d.toISOString().slice(0, 10);
-  const res = await fetch(`https://finnhub.io/api/v1/calendar/earnings?from=${fmt(from)}&to=${fmt(to)}&symbol=${encodeURIComponent(ticker)}&token=${FINNHUB_KEY}`);
+  const res = await fetch(finnhubUrl('calendar/earnings', { from: fmt(from), to: fmt(to), symbol: ticker }));
   const json = await res.json();
   const list = json && json.earningsCalendar;
   if (!Array.isArray(list) || !list.length) return null;
@@ -1045,7 +1049,7 @@ function analystBlockHtml(trend){
 }
 
 async function fetchDailySeries(ticker){
-  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(ticker)}&outputsize=full&apikey=${ALPHA_VANTAGE_KEY}`;
+  const url = `/.netlify/functions/market-data?provider=av&function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(ticker)}&outputsize=full`;
   const res = await fetch(url);
   const json = await res.json();
   trackApiUse();
@@ -2077,7 +2081,7 @@ async function getInsight(list, id){
 }
 
 async function fetchProfile(ticker){
-  const res = await fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${encodeURIComponent(ticker)}&token=${FINNHUB_KEY}`);
+  const res = await fetch(finnhubUrl('stock/profile2', { symbol: ticker }));
   const json = await res.json();
   if (!json || !json.name) throw new Error('NO_DATA');
   return json;
@@ -2093,7 +2097,7 @@ async function fetchCompanyNews(ticker){
   const from = new Date();
   from.setDate(from.getDate() - 7);
   const fmt = d => d.toISOString().slice(0, 10);
-  const res = await fetch(`https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${fmt(from)}&to=${fmt(to)}&token=${FINNHUB_KEY}`);
+  const res = await fetch(finnhubUrl('company-news', { symbol: ticker, from: fmt(from), to: fmt(to) }));
   const json = await res.json();
   if (!Array.isArray(json)) throw new Error('NO_DATA');
   return json
@@ -2110,7 +2114,7 @@ function timeAgo(unixSeconds){
   return `${days}d ago`;
 }
 async function fetchBasicFinancials(ticker){
-  const res = await fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${encodeURIComponent(ticker)}&metric=all&token=${FINNHUB_KEY}`);
+  const res = await fetch(finnhubUrl('stock/metric', { symbol: ticker, metric: 'all' }));
   const json = await res.json();
   if (!json || !json.metric) throw new Error('NO_DATA');
   return json.metric;
